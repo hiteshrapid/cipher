@@ -220,6 +220,7 @@ export class GestureEngine {
   private lastGesture: ExtendedGestureType | null = null
   private COOLDOWN_MS = 800
   private activeWidgets: Set<WidgetId> = new Set()
+  private lastLandmarks: Landmark[] | null = null
 
   async init(videoEl: HTMLVideoElement, dispatch: Dispatch): Promise<boolean> {
     this.videoEl  = videoEl
@@ -255,6 +256,11 @@ export class GestureEngine {
     this.activeWidgets = widgets
   }
 
+  /** Returns the most-recently detected hand landmarks (21 points) or null if no hand in frame */
+  getHandLandmarks(): Landmark[] | null {
+    return this.lastLandmarks
+  }
+
   start() {
     if (!this.landmarker || !this.videoEl) return
     this.loop()
@@ -278,6 +284,7 @@ export class GestureEngine {
     try {
       const results = this.landmarker.detectForVideo(this.videoEl, now)
       if (!results.landmarks || results.landmarks.length === 0) {
+        this.lastLandmarks = null
         wristHistory.length = 0  // reset swipe on hand loss
         fistHoldStart = null     // reset fist hold on hand loss
         return
@@ -291,6 +298,7 @@ export class GestureEngine {
   private lastDetectTime = 0
 
   private classifyAndDispatch(lm: Landmark[]) {
+    this.lastLandmarks = lm
     if (!this.dispatch) return
     const now = Date.now()
     if (now - this.lastGestureTime < this.COOLDOWN_MS) return
@@ -348,6 +356,7 @@ export class GestureEngine {
   }
 
   destroy() {
+    this.lastLandmarks = null
     this.stop()
     this.landmarker?.close?.()
     this.landmarker = null

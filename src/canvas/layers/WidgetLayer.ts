@@ -1,7 +1,7 @@
 // CIPHER — WidgetLayer
 // Draws floating HUD data panels onto the canvas
 
-import type { ConnectorData, WidgetId, SprintData, JiraIssue } from '../../types'
+import type { ConnectorData, WidgetId, SprintData, JiraIssue, SearchResult } from '../../types'
 
 const C = {
   primary:  'rgba(0, 255, 65, 0.85)',
@@ -234,6 +234,98 @@ function drawIssuesWidget(
   ctx.restore()
 }
 
+// ─── Word-wrap helper ─────────────────────────────────────────────────────────
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number, font: string): string[] {
+  ctx.font = font
+  const words = text.split(' ')
+  const lines: string[] = []
+  let current = ''
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word
+    if (ctx.measureText(test).width > maxW && current) {
+      lines.push(current)
+      current = word
+    } else {
+      current = test
+    }
+  }
+  if (current) lines.push(current)
+  return lines
+}
+
+// ─── Search widget ────────────────────────────────────────────────────────────
+function drawSearchWidget(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number,
+  query: string | null,
+  result: SearchResult | null,
+  loading: boolean,
+  age: number,
+) {
+  const PW   = 290
+  const font = `9px ${C.font}`
+  const textLines = result
+    ? wrapText(ctx, result.abstract, PW - 24, font).slice(0, 4)
+    : []
+  const PH = 40 + 24 + (loading ? 22 : textLines.length * 16 + (result ? 24 : 0)) + 14
+
+  drawPanel(ctx, x, y, PW, PH, '◈ CIPHER SEARCH', age)
+
+  const progress = Math.min(1, age / 300)
+  ctx.save()
+  ctx.globalAlpha = progress
+  ctx.translate((1 - progress) * -60, 0)
+
+  // Query line
+  if (query) {
+    const q = query.length > 30 ? query.slice(0, 30) + '…' : query
+    ctx.font         = `bold 10px ${C.font}`
+    ctx.fillStyle    = C.primary
+    ctx.textAlign    = 'left'
+    ctx.textBaseline = 'middle'
+    glow(ctx, 8)
+    ctx.fillText(q.toUpperCase(), x + 12, y + 40)
+    noGlow(ctx)
+  }
+
+  const contentY = y + 56
+
+  if (loading) {
+    const dots = '.'.repeat(1 + Math.floor(Date.now() / 300) % 4)
+    ctx.font      = `10px ${C.font}`
+    ctx.fillStyle = C.mid
+    ctx.textBaseline = 'middle'
+    ctx.fillText(`SCANNING${dots}`, x + 12, contentY)
+  } else if (result) {
+    // Title
+    ctx.font         = `11px ${C.font}`
+    ctx.fillStyle    = C.primary
+    ctx.textBaseline = 'middle'
+    glow(ctx, 6)
+    ctx.fillText(result.title.toUpperCase().slice(0, 28), x + 12, contentY)
+    noGlow(ctx)
+
+    // Abstract (max 4 lines)
+    ctx.font         = font
+    ctx.fillStyle    = 'rgba(0,255,65,0.65)'
+    ctx.textBaseline = 'top'
+    textLines.forEach((line, i) => {
+      ctx.fillText(line, x + 12, contentY + 14 + i * 16)
+    })
+
+    // Source
+    if (result.source) {
+      ctx.font      = `9px ${C.font}`
+      ctx.fillStyle = C.dim
+      ctx.textAlign = 'right'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(`via ${result.source}`, x + PW - 10, y + PH - 8)
+    }
+  }
+
+  ctx.restore()
+}
+
 // ─── Gesture feedback ─────────────────────────────────────────────────────────
 export function drawGestureFeedback(
   ctx: CanvasRenderingContext2D,
@@ -257,10 +349,11 @@ export function drawGestureFeedback(
 
 // ─── Widget positions (anchored to left side by default) ─────────────────────
 const WIDGET_POSITIONS: Record<WidgetId, { x: number; y: number }> = {
-  sprint: { x: 24, y: 80  },
-  issues: { x: 24, y: 310 },
-  clock:  { x: 0,  y: 0   },  // drawn by RingLayer
-  status: { x: 0,  y: 0   },  // drawn by RingLayer
+  sprint: { x: 24,  y: 80  },
+  issues: { x: 24,  y: 310 },
+  clock:  { x: 0,   y: 0   },  // drawn by RingLayer
+  status: { x: 0,   y: 0   },  // drawn by RingLayer
+  search: { x: 960, y: 80  },  // right-side panel
 }
 
 // ─── Main draw call ───────────────────────────────────────────────────────────
@@ -270,6 +363,9 @@ export function drawWidgets(
   connectorData: Record<string, ConnectorData>,
   widgetBirthTimes: Map<WidgetId, number>,
   now: number,
+  searchQuery?: string | null,
+  searchResult?: SearchResult | null,
+  searchLoading?: boolean,
 ) {
   const jiraData = connectorData['jira']?.data as { sprint?: SprintData; issues?: JiraIssue[] } | undefined
 
@@ -281,5 +377,16 @@ export function drawWidgets(
   if (activeWidgets.has('issues')) {
     const born = widgetBirthTimes.get('issues') ?? now
     drawIssuesWidget(ctx, WIDGET_POSITIONS.issues.x, WIDGET_POSITIONS.issues.y, jiraData?.issues ?? [], now - born)
+  }
+
+  if (activeWidgets.has('search')) {
+    const born = widgetBirthTimes.get('search') ?? now
+    drawSearchWidget(
+      ctx, WIDGET_POSITIONS.search.x, WIDGET_POSITIONS.search.y,
+      searchQuery ?? null,
+      searchResult ?? null,
+      searchLoading ?? false,
+      now - born,
+    )
   }
 }

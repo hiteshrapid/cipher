@@ -12,6 +12,9 @@ export const initialHUDState: HUDState = {
   config:        { ...DEFAULT_CONFIG },
   stealthMode:   false,
   alertLevel:    'NORMAL',
+  searchQuery:   null,
+  searchResult:  null,
+  searchLoading: false,
 }
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
@@ -25,10 +28,14 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
     case 'HIDE_WIDGET': {
       const next = new Set(state.activeWidgets)
       next.delete(action.id)
-      return { ...state, activeWidgets: next }
+      return {
+        ...state,
+        activeWidgets: next,
+        ...(action.id === 'search' ? { searchQuery: null, searchResult: null } : {}),
+      }
     }
     case 'HIDE_ALL':
-      return { ...state, activeWidgets: new Set<WidgetId>() }
+      return { ...state, activeWidgets: new Set<WidgetId>(), searchQuery: null, searchResult: null }
     case 'UPDATE_CONNECTOR':
       return {
         ...state,
@@ -50,6 +57,23 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
       }
     case 'SET_ALERT_LEVEL':
       return { ...state, alertLevel: action.level }
+    case 'SEARCH_QUERY': {
+      const next = new Set(state.activeWidgets)
+      next.add('search')
+      return {
+        ...state,
+        searchQuery:   action.query,
+        searchLoading: true,
+        searchResult:  null,
+        activeWidgets: next,
+      }
+    }
+    case 'SET_SEARCH_RESULT':
+      return {
+        ...state,
+        searchResult:  action.result,
+        searchLoading: action.loading ?? false,
+      }
     default:
       return state
   }

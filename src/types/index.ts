@@ -38,8 +38,16 @@ export interface SprintData {
   issues: JiraIssue[]
 }
 
+export interface SearchResult {
+  query:    string
+  title:    string
+  abstract: string
+  source:   string
+  url?:     string
+}
+
 // ─── HUD State ───────────────────────────────────────────────────────────────
-export type WidgetId = 'sprint' | 'issues' | 'clock' | 'status'
+export type WidgetId = 'sprint' | 'issues' | 'clock' | 'status' | 'search'
 
 export type AlertLevel = 'NORMAL' | 'ALERT' | 'CRITICAL' | 'STEALTH'
 
@@ -52,6 +60,9 @@ export interface HUDState {
   config: CipherConfig
   stealthMode: boolean
   alertLevel: AlertLevel
+  searchQuery:   string | null
+  searchResult:  SearchResult | null
+  searchLoading: boolean
 }
 
 export type HUDAction =
@@ -65,12 +76,15 @@ export type HUDAction =
   | { type: 'SET_CONFIG';        config: Partial<CipherConfig> }
   | { type: 'TOGGLE_STEALTH' }
   | { type: 'SET_ALERT_LEVEL';   level: 'NORMAL' | 'ALERT' | 'CRITICAL' | 'STEALTH' }
+  | { type: 'SEARCH_QUERY';      query: string }
+  | { type: 'SET_SEARCH_RESULT'; result: SearchResult | null; loading?: boolean }
 
 // ─── Voice ───────────────────────────────────────────────────────────────────
 export interface ParsedCommand {
-  action: 'show' | 'hide' | 'hideAll' | 'refresh'
+  action: 'show' | 'hide' | 'hideAll' | 'refresh' | 'search'
   target?: WidgetId
-  raw: string
+  query?:  string
+  raw:     string
 }
 
 // ─── Gestures ────────────────────────────────────────────────────────────────

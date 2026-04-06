@@ -7,9 +7,10 @@ import { useCameraCapture } from '../hooks/useCameraCapture'
 import { drawHUDChrome, drawCommandFeedback } from './layers/RingLayer'
 import type { AlertLevel } from './layers/RingLayer'
 import { drawWidgets, drawGestureFeedback } from './layers/WidgetLayer'
+import { drawHandSkeleton } from './layers/HandLayer'
 import { MatrixRainLayer } from './layers/MatrixRainLayer'
 import { useHUD } from '../store/hudStore'
-import type { WidgetId, ConnectorData } from '../types'
+import type { WidgetId, ConnectorData, SearchResult } from '../types'
 import { VoiceEngine } from '../engines/VoiceEngine'
 import { GestureEngine } from '../engines/GestureEngine'
 import { audioEngine } from '../engines/AudioEngine'
@@ -49,6 +50,9 @@ export function HUDCanvas() {
   const lastGestureRef   = useRef<{ type: string; timestamp: number } | null>(null)
   const alertLevelRef    = useRef<AlertLevel>('NORMAL')
   const stealthModeRef   = useRef(false)
+  const searchQueryRef   = useRef<string | null>(null)
+  const searchResultRef  = useRef<SearchResult | null>(null)
+  const searchLoadingRef = useRef(false)
 
   // Sync all refs from state on every render
   useEffect(() => {
@@ -65,6 +69,9 @@ export function HUDCanvas() {
     lastGestureRef.current   = state.lastGesture
     alertLevelRef.current    = state.alertLevel as AlertLevel
     stealthModeRef.current   = state.stealthMode
+    searchQueryRef.current   = state.searchQuery
+    searchResultRef.current  = state.searchResult
+    searchLoadingRef.current = state.searchLoading
 
     matrixRef.current?.setAlertLevel(state.alertLevel as AlertLevel)
     gestureRef.current?.updateActiveWidgets(state.activeWidgets)
@@ -105,6 +112,12 @@ export function HUDCanvas() {
       return
     }
 
+    // Search command acknowledgement
+    if (t.includes('searching:')) {
+      audioEngine.playSound('refresh')
+      return
+    }
+
     // Audio cues for widget show/hide
     if (t.startsWith('show') || t.includes('sprint') || t.includes('issues') || t.includes('✌') || t.includes('👍')) {
       audioEngine.playSound('summon')
@@ -118,6 +131,49 @@ export function HUDCanvas() {
       audioEngine.playSound('boot')
     }
   }, [state.lastCommand, state.stealthMode, dispatch])
+
+  // ─── Wikipedia search ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const query = state.searchQuery
+    if (!query) return
+
+    let cancelled = false
+
+    fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`,
+      { headers: { accept: 'application/json; charset=utf-8' } }
+    )
+      .then(res => {
+        if (!res.ok) throw new Error(res.status.toString())
+        return res.json() as Promise<Record<string, unknown>>
+      })
+      .then(data => {
+        if (cancelled) return
+        const title = String(data.title ?? query)
+        const abstract = String(data.extract ?? 'No summary available.')
+        const url = (data.content_urls as { desktop?: { page?: string } } | undefined)
+          ?.desktop?.page
+        dispatch({
+          type: 'SET_SEARCH_RESULT',
+          result: { query, title, abstract, source: 'Wikipedia', url },
+        })
+        audioEngine.speak(`Found: ${title}.`, 'high')
+      })
+      .catch(() => {
+        if (cancelled) return
+        dispatch({
+          type: 'SET_SEARCH_RESULT',
+          result: {
+            query,
+            title:    query,
+            abstract: `No instant result for "${query}". Try a more specific term.`,
+            source:   '',
+          },
+        })
+      })
+
+    return () => { cancelled = true }
+  }, [state.searchQuery, dispatch])
 
   // ─── Alert level from connector data ─────────────────────────────────────────
   useEffect(() => {
@@ -244,6 +300,12 @@ export function HUDCanvas() {
       ctx.drawImage(video, 0, 0, W, H)
     }
 
+    // ③.5 Hand skeleton overlay (neon finger web, on top of video)
+    const handLandmarks = gestureRef.current?.getHandLandmarks()
+    if (handLandmarks && !stealthModeRef.current) {
+      drawHandSkeleton(ctx, handLandmarks, W, H, lastGestureRef.current, t)
+    }
+
     // ④ Vignette for HUD readability
     const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.2, W / 2, H / 2, H * 0.8)
     grad.addColorStop(0, 'rgba(0,0,0,0)')
@@ -262,7 +324,10 @@ export function HUDCanvas() {
 
     // ⑥ Widgets (skipped in stealth mode)
     if (!stealthModeRef.current) {
-      drawWidgets(ctx, activeWidgetsRef.current, connectorDataRef.current, birthTimes.current, now)
+      drawWidgets(
+        ctx, activeWidgetsRef.current, connectorDataRef.current, birthTimes.current, now,
+        searchQueryRef.current, searchResultRef.current, searchLoadingRef.current,
+      )
     }
 
     // ⑦ Command feedback

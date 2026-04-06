@@ -27,6 +27,14 @@ function parseCommand(transcript: string): ParsedCommand | null {
     return { action: 'refresh', raw: t }
   }
 
+  // Search / lookup commands — extract query after trigger phrase
+  const searchMatch = t.match(
+    /^(?:search(?:\s+for)?|find|look up|what(?:'s|\s+is)\s+(?:a\s+)?|tell me about|show me|who\s+is)\s+(.+)/
+  )
+  if (searchMatch) {
+    return { action: 'search', query: searchMatch[1].trim(), raw: t }
+  }
+
   for (const [alias, widgetId] of Object.entries(WIDGET_ALIASES)) {
     if (new RegExp(`\\b${alias}\\b`).test(t)) {
       if (/^(show|open|bring up|display|pull up|get)/.test(t)) {
@@ -35,7 +43,6 @@ function parseCommand(transcript: string): ParsedCommand | null {
       if (/^(hide|close|dismiss|remove|clear)/.test(t)) {
         return { action: 'hide', target: widgetId, raw: t }
       }
-      // If just the widget name is said, toggle show
       return { action: 'show', target: widgetId, raw: t }
     }
   }
@@ -60,6 +67,12 @@ function executeCommand(cmd: ParsedCommand, dispatch: Dispatch) {
     case 'refresh':
       // Registry refresh is handled by the component listening to this action
       dispatch({ type: 'COMMAND_RECEIVED', text: '↺ refreshing connectors' })
+      break
+    case 'search':
+      if (cmd.query) {
+        dispatch({ type: 'SEARCH_QUERY', query: cmd.query })
+        dispatch({ type: 'COMMAND_RECEIVED', text: `◈ searching: ${cmd.query}` })
+      }
       break
   }
 }
@@ -105,10 +118,21 @@ export class VoiceEngine {
         this.wakeWordTimeout = window.setTimeout(() => {
           this.wakeWordDetected = false
         }, 8000)
+
+        // Handle inline command after "cipher" in the same utterance
+        const afterCipher = t.replace(/^.*\b(hey\s+)?cipher\b\s*/, '').trim()
+        if (afterCipher) {
+          const inlineCmd = parseCommand(afterCipher)
+          if (inlineCmd && this.dispatch) {
+            executeCommand(inlineCmd, this.dispatch)
+            return
+          }
+        }
+
         if (this.dispatch) {
           this.dispatch({ type: 'COMMAND_RECEIVED', text: '◈ CIPHER ONLINE · AWAITING COMMAND' })
         }
-        return  // don't try to parse wake word itself as a command
+        return
       }
 
       // Process command: allowed if wake word active OR wake word not required (v1 behaviour)
