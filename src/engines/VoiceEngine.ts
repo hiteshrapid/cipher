@@ -71,6 +71,9 @@ export class VoiceEngine {
   private recognition: AnySpeechRecognition = null
   private dispatch: Dispatch | null = null
   private active = false
+  private wakeWordDetected = false
+  private wakeWordTimeout = 0
+  private wakeWordRequired = false
 
   init(dispatch: Dispatch): boolean {
     this.dispatch = dispatch
@@ -93,9 +96,27 @@ export class VoiceEngine {
       const last = e.results[e.results.length - 1]
       if (!last.isFinal) return
       const transcript = last[0].transcript.trim()
-      const cmd = parseCommand(transcript)
-      if (cmd && this.dispatch) {
-        executeCommand(cmd, this.dispatch)
+      const t = transcript.toLowerCase()
+
+      // Wake word detection
+      if (/\b(hey\s+)?cipher\b/.test(t)) {
+        this.wakeWordDetected = true
+        clearTimeout(this.wakeWordTimeout)
+        this.wakeWordTimeout = window.setTimeout(() => {
+          this.wakeWordDetected = false
+        }, 8000)
+        if (this.dispatch) {
+          this.dispatch({ type: 'COMMAND_RECEIVED', text: '◈ CIPHER ONLINE · AWAITING COMMAND' })
+        }
+        return  // don't try to parse wake word itself as a command
+      }
+
+      // Process command: allowed if wake word active OR wake word not required (v1 behaviour)
+      if (this.wakeWordDetected || !this.wakeWordRequired) {
+        const cmd = parseCommand(transcript)
+        if (cmd && this.dispatch) {
+          executeCommand(cmd, this.dispatch)
+        }
       }
     }
 
@@ -127,8 +148,18 @@ export class VoiceEngine {
     try { this.recognition?.stop() } catch { /* ignore */ }
   }
 
+  setWakeWordRequired(required: boolean): void {
+    this.wakeWordRequired = required
+    if (!required) {
+      // reset state when disabling strict mode
+      this.wakeWordDetected = false
+      clearTimeout(this.wakeWordTimeout)
+    }
+  }
+
   destroy() {
     this.stop()
+    clearTimeout(this.wakeWordTimeout)
     this.recognition = null
     this.dispatch    = null
   }

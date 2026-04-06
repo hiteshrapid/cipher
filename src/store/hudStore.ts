@@ -6,10 +6,12 @@ import { DEFAULT_CONFIG } from '../types'
 export const initialHUDState: HUDState = {
   activeWidgets: new Set<WidgetId>(),
   connectorData: {},
-  lastCommand: null,
-  lastGesture: null,
-  configOpen: false,
-  config: { ...DEFAULT_CONFIG },
+  lastCommand:   null,
+  lastGesture:   null,
+  configOpen:    false,
+  config:        { ...DEFAULT_CONFIG },
+  stealthMode:   false,
+  alertLevel:    'NORMAL',
 }
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
@@ -40,6 +42,14 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
       return { ...state, configOpen: !state.configOpen }
     case 'SET_CONFIG':
       return { ...state, config: { ...state.config, ...action.config } }
+    case 'TOGGLE_STEALTH':
+      return {
+        ...state,
+        stealthMode: !state.stealthMode,
+        alertLevel: !state.stealthMode ? 'STEALTH' : 'NORMAL',
+      }
+    case 'SET_ALERT_LEVEL':
+      return { ...state, alertLevel: action.level }
     default:
       return state
   }

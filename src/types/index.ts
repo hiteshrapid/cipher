@@ -41,6 +41,8 @@ export interface SprintData {
 // ─── HUD State ───────────────────────────────────────────────────────────────
 export type WidgetId = 'sprint' | 'issues' | 'clock' | 'status'
 
+export type AlertLevel = 'NORMAL' | 'ALERT' | 'CRITICAL' | 'STEALTH'
+
 export interface HUDState {
   activeWidgets: Set<WidgetId>
   connectorData: Record<string, ConnectorData>
@@ -48,6 +50,8 @@ export interface HUDState {
   lastGesture: { type: GestureType; timestamp: number } | null
   configOpen: boolean
   config: CipherConfig
+  stealthMode: boolean
+  alertLevel: AlertLevel
 }
 
 export type HUDAction =
@@ -59,6 +63,8 @@ export type HUDAction =
   | { type: 'GESTURE_DETECTED';  gesture: GestureType }
   | { type: 'TOGGLE_CONFIG' }
   | { type: 'SET_CONFIG';        config: Partial<CipherConfig> }
+  | { type: 'TOGGLE_STEALTH' }
+  | { type: 'SET_ALERT_LEVEL';   level: 'NORMAL' | 'ALERT' | 'CRITICAL' | 'STEALTH' }
 
 // ─── Voice ───────────────────────────────────────────────────────────────────
 export interface ParsedCommand {
