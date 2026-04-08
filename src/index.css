@@ -10,6 +10,13 @@ html, body, #root {
   font-family: 'Courier New', Courier, monospace;
 }
 
+/* OBS overlay mode: transparent background so HUD composites over webcam */
+html.overlay-mode,
+html.overlay-mode body,
+html.overlay-mode #root {
+  background: rgba(0, 0, 0, 0) !important;
+}
+
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: #000; }
 ::-webkit-scrollbar-thumb { background: rgba(0, 255, 65, 0.3); border-radius: 2px; }

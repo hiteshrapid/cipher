@@ -431,6 +431,7 @@ export function drawHUDChrome(
   connectorStatuses: Array<{ label: string; status: string }>,
   alertLevel: AlertLevel = 'NORMAL',
   waveformSamples?: Float32Array | number[],
+  voiceStatus?: string,
 ) {
   // Update module-level colour palette to match the current alert level
   C = getRingColors(alertLevel)
@@ -464,4 +465,53 @@ export function drawHUDChrome(
   drawStatusBar(ctx, w, h, connectorStatuses)
   drawClock(ctx, w)
   drawAlertBadge(ctx, alertLevel)
+
+  // Listening indicator (top center)
+  if (voiceStatus && voiceStatus !== 'inactive') {
+    drawListeningIndicator(ctx, w, voiceStatus, t)
+  }
+}
+
+// ─── Listening Indicator ──────────────────────────────────────────────────────
+function drawListeningIndicator(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  voiceStatus: string,
+  t: number,
+) {
+  ctx.save()
+  const cx = w / 2
+  const y = 18
+
+  if (voiceStatus === 'listening') {
+    const pulse = 0.5 + 0.5 * Math.sin(t / 500)
+    ctx.globalAlpha = 0.4 + 0.6 * pulse
+    ctx.font = '10px "Courier New", monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.fillStyle = 'rgba(0, 255, 65, 0.85)'
+    ctx.shadowColor = '#00ff41'
+    ctx.shadowBlur = 10 * pulse
+    ctx.fillText('\u25C8 CIPHER LISTENING', cx, y)
+  } else if (voiceStatus === 'denied') {
+    ctx.globalAlpha = 0.7
+    ctx.font = '10px "Courier New", monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.fillStyle = 'rgba(255, 80, 80, 0.7)'
+    ctx.shadowColor = '#ff3232'
+    ctx.shadowBlur = 6
+    ctx.fillText('\u2716 MIC DENIED', cx, y)
+  } else if (voiceStatus === 'error') {
+    ctx.globalAlpha = 0.7
+    ctx.font = '10px "Courier New", monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.fillStyle = 'rgba(255, 160, 0, 0.7)'
+    ctx.shadowColor = '#ffa000'
+    ctx.shadowBlur = 6
+    ctx.fillText('\u26A0 VOICE ERROR', cx, y)
+  }
+
+  ctx.restore()
 }

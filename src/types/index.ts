@@ -21,33 +21,140 @@ export interface Connector {
   poll(): Promise<Record<string, unknown>>
 }
 
-// ─── Jira ────────────────────────────────────────────────────────────────────
-export interface JiraIssue {
-  key: string
-  summary: string
-  status: string
-  priority: string
-  assignee?: string
+// ─── GitHub ──────────────────────────────────────────────────────────────────
+export interface GitHubPR {
+  number: number
+  title: string
+  state: string
+  author: string
+  reviewers: string[]
+  url: string
+  updatedAt: string
 }
 
-export interface SprintData {
-  sprintName: string
-  openCount: number
-  doneCount: number
-  totalCount: number
-  issues: JiraIssue[]
+export interface GitHubIssue {
+  number: number
+  title: string
+  state: string
+  labels: string[]
+  url: string
+  updatedAt: string
 }
 
+export interface GitHubData {
+  openPRs: GitHubPR[]
+  reviewRequested: GitHubPR[]
+  assignedIssues: GitHubIssue[]
+}
+
+// ─── Calendar ────────────────────────────────────────────────────────────────
+export interface CalendarEvent {
+  id: string
+  title: string
+  start: string
+  end: string
+  location?: string
+  attendees: string[]
+  isAllDay: boolean
+  meetUrl?: string
+}
+
+export interface CalendarData {
+  todayEvents: CalendarEvent[]
+  upcomingEvents: CalendarEvent[]
+  nextEvent: CalendarEvent | null
+}
+
+// ─── Linear ──────────────────────────────────────────────────────────────────
+export interface LinearTicket {
+  id: string
+  identifier: string
+  title: string
+  state: string
+  priority: number
+  url: string
+}
+
+export interface LinearData {
+  assignedTickets: LinearTicket[]
+  projectName: string
+  isMock?: boolean
+}
+
+// ─── Slack ───────────────────────────────────────────────────────────────────
+export interface SlackMessage {
+  channel: string
+  author: string
+  text: string
+  timestamp: string
+  isDM: boolean
+}
+
+export interface SlackData {
+  unreadCount: number
+  mentions: SlackMessage[]
+  recentDMs: SlackMessage[]
+  isMock?: boolean
+}
+
+// ─── Gmail ───────────────────────────────────────────────────────────────────
+export interface GmailThread {
+  id: string
+  subject: string
+  from: string
+  snippet: string
+  timestamp: string
+  unread: boolean
+}
+
+export interface GmailData {
+  unreadCount: number
+  recentThreads: GmailThread[]
+  isMock?: boolean
+}
+
+// ─── Notifications & Activity ────────────────────────────────────────────────
+export interface NotificationItem {
+  source: 'slack' | 'gmail' | 'github'
+  text: string
+  timestamp: number
+  priority: 'low' | 'normal' | 'high'
+}
+
+export interface ActivityItem {
+  source: string
+  text: string
+  timestamp: number
+  icon: string
+}
+
+// ─── Search ──────────────────────────────────────────────────────────────────
 export interface SearchResult {
   query:    string
   title:    string
   abstract: string
   source:   string
   url?:     string
+  bullets?: string[]  // 3–5 key sentences for the Iron Man Intel Card
 }
 
+// ─── Voice ───────────────────────────────────────────────────────────────────
+export type VoiceStatus = 'inactive' | 'listening' | 'error' | 'denied'
+
+export interface ParsedCommand {
+  action: 'show' | 'hide' | 'hideAll' | 'refresh' | 'search'
+  target?: WidgetId
+  query?:  string
+  raw:     string
+}
+
+// ─── Gestures ────────────────────────────────────────────────────────────────
+export type GestureType = 'open_palm' | 'pinch' | 'swipe_left' | 'swipe_right'
+
 // ─── HUD State ───────────────────────────────────────────────────────────────
-export type WidgetId = 'sprint' | 'issues' | 'clock' | 'status' | 'search'
+export type WidgetId =
+  | 'sprint' | 'issues' | 'clock' | 'status' | 'search'
+  | 'github' | 'calendar' | 'notifications' | 'activity' | 'metrics'
 
 export type AlertLevel = 'NORMAL' | 'ALERT' | 'CRITICAL' | 'STEALTH'
 
@@ -63,6 +170,10 @@ export interface HUDState {
   searchQuery:   string | null
   searchResult:  SearchResult | null
   searchLoading: boolean
+  voiceStatus: VoiceStatus
+  notifications: NotificationItem[]
+  activityFeed: ActivityItem[]
+  transcriptPanel: { active: boolean; x: number; y: number; text: string }
 }
 
 export type HUDAction =
@@ -75,30 +186,32 @@ export type HUDAction =
   | { type: 'TOGGLE_CONFIG' }
   | { type: 'SET_CONFIG';        config: Partial<CipherConfig> }
   | { type: 'TOGGLE_STEALTH' }
-  | { type: 'SET_ALERT_LEVEL';   level: 'NORMAL' | 'ALERT' | 'CRITICAL' | 'STEALTH' }
+  | { type: 'SET_ALERT_LEVEL';   level: AlertLevel }
   | { type: 'SEARCH_QUERY';      query: string }
   | { type: 'SET_SEARCH_RESULT'; result: SearchResult | null; loading?: boolean }
-
-// ─── Voice ───────────────────────────────────────────────────────────────────
-export interface ParsedCommand {
-  action: 'show' | 'hide' | 'hideAll' | 'refresh' | 'search'
-  target?: WidgetId
-  query?:  string
-  raw:     string
-}
-
-// ─── Gestures ────────────────────────────────────────────────────────────────
-export type GestureType = 'open_palm' | 'pinch' | 'swipe_left' | 'swipe_right'
+  | { type: 'SET_VOICE_STATUS';  status: VoiceStatus }
+  | { type: 'ADD_NOTIFICATION';  item: NotificationItem }
+  | { type: 'ADD_ACTIVITY';      item: ActivityItem }
+  | { type: 'TOGGLE_TRANSCRIPT'; x: number; y: number }
+  | { type: 'UPDATE_TRANSCRIPT'; text: string }
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 export interface CipherConfig {
-  jiraConfigured: boolean
+  githubConfigured: boolean
+  calendarConfigured: boolean
+  linearConfigured: boolean
+  slackConfigured: boolean
+  gmailConfigured: boolean
   voiceEnabled: boolean
   gestureEnabled: boolean
 }
 
 export const DEFAULT_CONFIG: CipherConfig = {
-  jiraConfigured: false,
+  githubConfigured: false,
+  calendarConfigured: false,
+  linearConfigured: false,
+  slackConfigured: false,
+  gmailConfigured: false,
   voiceEnabled: true,
   gestureEnabled: true,
 }

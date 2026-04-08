@@ -1,6 +1,9 @@
 import { createContext, useContext } from 'react'
-import type { HUDState, HUDAction, WidgetId } from '../types'
+import type { HUDState, HUDAction, WidgetId, NotificationItem, ActivityItem } from '../types'
 import { DEFAULT_CONFIG } from '../types'
+
+const MAX_NOTIFICATIONS = 20
+const MAX_ACTIVITY = 30
 
 // ─── Initial State ────────────────────────────────────────────────────────────
 export const initialHUDState: HUDState = {
@@ -15,6 +18,10 @@ export const initialHUDState: HUDState = {
   searchQuery:   null,
   searchResult:  null,
   searchLoading: false,
+  voiceStatus:   'inactive',
+  notifications: [],
+  activityFeed:  [],
+  transcriptPanel: { active: false, x: 0, y: 0, text: '' },
 }
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
@@ -35,7 +42,7 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
       }
     }
     case 'HIDE_ALL':
-      return { ...state, activeWidgets: new Set<WidgetId>(), searchQuery: null, searchResult: null }
+      return { ...state, activeWidgets: new Set<WidgetId>(), searchQuery: null, searchResult: null, transcriptPanel: { active: false, x: 0, y: 0, text: '' } }
     case 'UPDATE_CONNECTOR':
       return {
         ...state,
@@ -73,6 +80,30 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
         ...state,
         searchResult:  action.result,
         searchLoading: action.loading ?? false,
+      }
+    case 'SET_VOICE_STATUS':
+      return { ...state, voiceStatus: action.status }
+    case 'ADD_NOTIFICATION': {
+      const notifications = [action.item, ...state.notifications].slice(0, MAX_NOTIFICATIONS) as NotificationItem[]
+      return { ...state, notifications }
+    }
+    case 'ADD_ACTIVITY': {
+      const activityFeed = [action.item, ...state.activityFeed].slice(0, MAX_ACTIVITY) as ActivityItem[]
+      return { ...state, activityFeed }
+    }
+    case 'TOGGLE_TRANSCRIPT':
+      if (state.transcriptPanel.active) {
+        return { ...state, transcriptPanel: { active: false, x: 0, y: 0, text: '' } }
+      }
+      return { ...state, transcriptPanel: { active: true, x: action.x, y: action.y, text: '' } }
+    case 'UPDATE_TRANSCRIPT':
+      if (!state.transcriptPanel.active) return state
+      return {
+        ...state,
+        transcriptPanel: {
+          ...state.transcriptPanel,
+          text: action.text.slice(-120),
+        },
       }
     default:
       return state

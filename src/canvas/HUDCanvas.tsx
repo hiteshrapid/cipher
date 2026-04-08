@@ -6,18 +6,22 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useCameraCapture } from '../hooks/useCameraCapture'
 import { drawHUDChrome, drawCommandFeedback } from './layers/RingLayer'
 import type { AlertLevel } from './layers/RingLayer'
-import { drawWidgets, drawGestureFeedback } from './layers/WidgetLayer'
+import { drawWidgets, drawGestureFeedback, drawFaceScanRing, drawIntelCard } from './layers/WidgetLayer'
 import { drawHandSkeleton } from './layers/HandLayer'
 import { MatrixRainLayer } from './layers/MatrixRainLayer'
 import { useHUD } from '../store/hudStore'
-import type { WidgetId, ConnectorData, SearchResult } from '../types'
-import { VoiceEngine } from '../engines/VoiceEngine'
+import type { WidgetId, ConnectorData, SearchResult, NotificationItem, ActivityItem } from '../types'
 import { GestureEngine } from '../engines/GestureEngine'
 import { audioEngine } from '../engines/AudioEngine'
+import { interactiveMode } from '../engines/InteractiveMode'
+import { smartSearch } from '../connectors/SearchEngine'
 import { registry } from '../connectors/ConnectorRegistry'
-import { JiraConnector } from '../connectors/JiraConnector'
 import { GitHubConnector } from '../connectors/GitHubConnector'
 import { CalendarConnector } from '../connectors/CalendarConnector'
+import { SlackConnector } from '../connectors/SlackConnector'
+import { GmailConnector } from '../connectors/GmailConnector'
+import { LinearConnector } from '../connectors/LinearConnector'
+import { pushState, startPolling } from '../sync/StateSync'
 
 // Canvas output dimensions — standard webcam & OBS default
 const W = 1280
@@ -34,7 +38,11 @@ export function HUDCanvas() {
   const { videoRef, ready, error } = useCameraCapture()
   const { state, dispatch } = useHUD()
 
-  const voiceRef   = useRef<VoiceEngine | null>(null)
+  // OBS overlay mode: ?overlay=true → transparent canvas, no webcam draw
+  const overlayMode = useRef(
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('overlay')
+  )
+
   const gestureRef = useRef<GestureEngine | null>(null)
   const matrixRef  = useRef<MatrixRainLayer | null>(null)
   const rafRef     = useRef<number>(0)
@@ -50,9 +58,15 @@ export function HUDCanvas() {
   const lastGestureRef   = useRef<{ type: string; timestamp: number } | null>(null)
   const alertLevelRef    = useRef<AlertLevel>('NORMAL')
   const stealthModeRef   = useRef(false)
-  const searchQueryRef   = useRef<string | null>(null)
-  const searchResultRef  = useRef<SearchResult | null>(null)
-  const searchLoadingRef = useRef(false)
+  const searchQueryRef      = useRef<string | null>(null)
+  const searchResultRef     = useRef<SearchResult | null>(null)
+  const searchLoadingRef    = useRef(false)
+  const intelCardShownAtRef = useRef<number | null>(null)
+  const notificationsRef       = useRef<NotificationItem[]>([])
+  const activityFeedRef        = useRef<ActivityItem[]>([])
+  const bootTimeRef            = useRef<number>(Date.now())
+  const transcriptPanelRef     = useRef(state.transcriptPanel)
+  const transcriptPanelBornAt  = useRef<number | null>(null)
 
   // Sync all refs from state on every render
   useEffect(() => {
@@ -72,9 +86,27 @@ export function HUDCanvas() {
     searchQueryRef.current   = state.searchQuery
     searchResultRef.current  = state.searchResult
     searchLoadingRef.current = state.searchLoading
+    notificationsRef.current = state.notifications ?? []
+    activityFeedRef.current  = state.activityFeed ?? []
+
+    // Track transcript panel birth for entrance animation
+    if (state.transcriptPanel.active && !transcriptPanelBornAt.current) {
+      transcriptPanelBornAt.current = Date.now()
+    } else if (!state.transcriptPanel.active) {
+      transcriptPanelBornAt.current = null
+    }
+    transcriptPanelRef.current = {
+      ...state.transcriptPanel,
+      bornAt: transcriptPanelBornAt.current ?? undefined,
+    } as typeof state.transcriptPanel & { bornAt?: number }
 
     matrixRef.current?.setAlertLevel(state.alertLevel as AlertLevel)
     gestureRef.current?.updateActiveWidgets(state.activeWidgets)
+
+    // Sync state to OBS overlay (controller mode — non-overlay tab pushes state)
+    if (!overlayMode.current) {
+      pushState(state)
+    }
   })
 
   // ─── Command side-effects (stealth, speak summary, sounds) ───────────────────
@@ -86,78 +118,39 @@ export function HUDCanvas() {
 
     const t = cmd.text.toLowerCase()
 
-    // Stealth toggle via rock-on gesture or voice
-    if (t.includes('stealth')) {
-      dispatch({ type: 'TOGGLE_STEALTH' })
-      audioEngine.playSound(state.stealthMode ? 'summon' : 'dismiss')
-      return
-    }
-
     // Speak sprint summary
     if (t.includes('speaking summary')) {
-      const jira = connectorDataRef.current['jira']
-      if (jira?.status === 'connected') {
-        const sprint = (jira.data as { sprint?: { sprintName: string; openCount: number; doneCount: number } }).sprint
-        if (sprint) {
+      const linear = connectorDataRef.current['linear']
+      if (linear?.status === 'connected') {
+        const data = linear.data as { assignedTickets?: unknown[]; projectName?: string }
+        if (data?.assignedTickets) {
           audioEngine.speak(
-            `${sprint.sprintName}. ${sprint.openCount} issues open, ${sprint.doneCount} done.`,
+            `${data.projectName ?? 'Linear'}. ${data.assignedTickets.length} tickets assigned.`,
             'high'
           )
         } else {
-          audioEngine.speak('No active sprint data available.', 'high')
+          audioEngine.speak('No Linear data available.', 'high')
         }
       } else {
-        audioEngine.speak('Jira not connected.', 'high')
+        audioEngine.speak('Linear not connected.', 'high')
       }
       return
     }
 
-    // Search command acknowledgement
-    if (t.includes('searching:')) {
-      audioEngine.playSound('refresh')
-      return
-    }
-
-    // Audio cues for widget show/hide
-    if (t.startsWith('show') || t.includes('sprint') || t.includes('issues') || t.includes('✌') || t.includes('👍')) {
-      audioEngine.playSound('summon')
-    } else if (t.includes('hide') || t.includes('clear') || t.includes('✊') || t.includes('👎')) {
-      audioEngine.playSound('dismiss')
-    } else if (t.includes('refresh') || t.includes('↺')) {
-      audioEngine.playSound('refresh')
-    } else if (t.includes('confirmed')) {
-      audioEngine.playSound('confirm')
-    } else if (t.includes('online') || t.includes('awaiting command')) {
-      audioEngine.playSound('boot')
-    }
   }, [state.lastCommand, state.stealthMode, dispatch])
 
-  // ─── Wikipedia search ────────────────────────────────────────────────────────
+  // ─── Smart search (OpenAI → DuckDuckGo → Wikipedia) ──────────────────────────
   useEffect(() => {
     const query = state.searchQuery
     if (!query) return
 
     let cancelled = false
 
-    fetch(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`,
-      { headers: { accept: 'application/json; charset=utf-8' } }
-    )
-      .then(res => {
-        if (!res.ok) throw new Error(res.status.toString())
-        return res.json() as Promise<Record<string, unknown>>
-      })
-      .then(data => {
+    smartSearch(query)
+      .then(result => {
         if (cancelled) return
-        const title = String(data.title ?? query)
-        const abstract = String(data.extract ?? 'No summary available.')
-        const url = (data.content_urls as { desktop?: { page?: string } } | undefined)
-          ?.desktop?.page
-        dispatch({
-          type: 'SET_SEARCH_RESULT',
-          result: { query, title, abstract, source: 'Wikipedia', url },
-        })
-        audioEngine.speak(`Found: ${title}.`, 'high')
+        dispatch({ type: 'SET_SEARCH_RESULT', result })
+        audioEngine.speak(`Found: ${result.title}.`, 'high')
       })
       .catch(() => {
         if (cancelled) return
@@ -165,15 +158,29 @@ export function HUDCanvas() {
           type: 'SET_SEARCH_RESULT',
           result: {
             query,
-            title:    query,
-            abstract: `No instant result for "${query}". Try a more specific term.`,
-            source:   '',
+            title: query,
+            abstract: `No result for "${query}". Try a different query.`,
+            source: '',
           },
         })
       })
 
     return () => { cancelled = true }
   }, [state.searchQuery, dispatch])
+
+  // ─── Intel Card lifetime tracking + auto-dismiss ──────────────────────────────
+  useEffect(() => {
+    if (state.searchResult) {
+      intelCardShownAtRef.current = Date.now()
+      const timer = setTimeout(() => {
+        dispatch({ type: 'HIDE_WIDGET', id: 'search' })
+        intelCardShownAtRef.current = null
+      }, 7000)
+      return () => clearTimeout(timer)
+    } else {
+      intelCardShownAtRef.current = null
+    }
+  }, [state.searchResult, dispatch])
 
   // ─── Alert level from connector data ─────────────────────────────────────────
   useEffect(() => {
@@ -198,14 +205,6 @@ export function HUDCanvas() {
       dispatch({ type: 'UPDATE_CONNECTOR', id: data.id, data })
     })
 
-    // Jira
-    if (import.meta.env.VITE_JIRA_URL) {
-      const jira = new JiraConnector()
-      jira.configure({ boardId: import.meta.env.VITE_JIRA_BOARD_ID ?? '1' })
-      registry.register(jira, 60_000)
-      dispatch({ type: 'SET_CONFIG', config: { jiraConfigured: true } })
-    }
-
     // GitHub
     if (import.meta.env.VITE_GITHUB_TOKEN) {
       const gh = new GitHubConnector()
@@ -222,7 +221,41 @@ export function HUDCanvas() {
         calendarId:  import.meta.env.VITE_GCAL_CALENDAR_ID ?? 'primary',
       })
       registry.register(cal, 30_000)
+      dispatch({ type: 'SET_CONFIG', config: { calendarConfigured: true } })
     }
+
+    // Slack
+    if (import.meta.env.VITE_SLACK_BOT_TOKEN) {
+      const slack = new SlackConnector()
+      slack.configure({})
+      registry.register(slack, 30_000)
+      dispatch({ type: 'SET_CONFIG', config: { slackConfigured: true } })
+    }
+
+    // Gmail
+    if (import.meta.env.VITE_GMAIL_TOKEN) {
+      const gmail = new GmailConnector()
+      gmail.configure({})
+      registry.register(gmail, 60_000)
+      dispatch({ type: 'SET_CONFIG', config: { gmailConfigured: true } })
+    }
+
+    // Linear
+    if (import.meta.env.VITE_LINEAR_TOKEN) {
+      const linear = new LinearConnector()
+      linear.configure({})
+      registry.register(linear, 60_000)
+      dispatch({ type: 'SET_CONFIG', config: { linearConfigured: true } })
+    }
+
+    // Auto-show default widgets
+    dispatch({ type: 'SHOW_WIDGET', id: 'sprint' })
+    dispatch({ type: 'SHOW_WIDGET', id: 'issues' })
+    dispatch({ type: 'SHOW_WIDGET', id: 'github' })
+    dispatch({ type: 'SHOW_WIDGET', id: 'calendar' })
+    dispatch({ type: 'SHOW_WIDGET', id: 'notifications' })
+    dispatch({ type: 'SHOW_WIDGET', id: 'activity' })
+    dispatch({ type: 'SHOW_WIDGET', id: 'metrics' })
 
     return () => { unsub(); registry.destroy() }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -239,7 +272,7 @@ export function HUDCanvas() {
       if (!bootedRef.current) {
         bootedRef.current = true
         audioEngine.playSound('boot')
-        audioEngine.speak('CIPHER online. Systems nominal.', 'high')
+        // TTS disabled — was annoying on every reload
       }
     }, 1200)
 
@@ -248,19 +281,17 @@ export function HUDCanvas() {
     rain.resize(W, H)
     matrixRef.current = rain
 
-    // Voice
-    const voice = new VoiceEngine()
-    voice.init(dispatch)
-    if (state.config.voiceEnabled) voice.start()
-    voiceRef.current = voice
+    // Interactive mode (Deepgram STT + Cartesia TTS — activated by rock-on gesture)
+    interactiveMode.init(dispatch)
 
     // Gesture
     const gesture = new GestureEngine()
+    gesture.setCanvasSize(W, H)
     gestureRef.current = gesture
 
     return () => {
-      voice.destroy()
       gesture.destroy()
+      interactiveMode.destroy()
       audioEngine.destroy()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -275,6 +306,54 @@ export function HUDCanvas() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready])
 
+  // Transcript panel active → start/stop InteractiveMode
+  useEffect(() => {
+    if (state.transcriptPanel.active) {
+      interactiveMode.activate()
+    } else {
+      interactiveMode.deactivate()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.transcriptPanel.active])
+
+  // ─── Overlay mode: poll state from controller tab ───────────────────────────
+  useEffect(() => {
+    if (!overlayMode.current) return
+    const stop = startPolling((sync) => {
+      // Use refs (not state) to avoid stale closure — refs are always current
+      const currentWidgets = activeWidgetsRef.current
+      const syncIds = new Set(sync.activeWidgets)
+
+      // Reconcile widget visibility
+      currentWidgets.forEach(id => {
+        if (!syncIds.has(id)) dispatch({ type: 'HIDE_WIDGET', id })
+      })
+      syncIds.forEach(id => {
+        if (!currentWidgets.has(id as WidgetId)) dispatch({ type: 'SHOW_WIDGET', id: id as WidgetId })
+      })
+
+      // Sync stealth
+      if (sync.stealthMode !== stealthModeRef.current) dispatch({ type: 'TOGGLE_STEALTH' })
+
+      // Sync alert level
+      if (sync.alertLevel !== alertLevelRef.current) {
+        dispatch({ type: 'SET_ALERT_LEVEL', level: sync.alertLevel as AlertLevel })
+      }
+
+      // Sync search
+      if (sync.searchQuery && sync.searchQuery !== searchQueryRef.current) {
+        dispatch({ type: 'SEARCH_QUERY', query: sync.searchQuery })
+      }
+
+      // Sync command feedback
+      if (sync.lastCommand && sync.lastCommand !== lastCommandRef.current?.text) {
+        dispatch({ type: 'COMMAND_RECEIVED', text: sync.lastCommand })
+      }
+    })
+    return stop
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ─── Render loop ─────────────────────────────────────────────────────────────
   const render = useCallback(() => {
     const canvas = canvasRef.current
@@ -288,30 +367,41 @@ export function HUDCanvas() {
     const now = Date.now()
     const alertLevel = alertLevelRef.current
 
-    // ① Black base
-    ctx.fillStyle = '#000'
-    ctx.fillRect(0, 0, W, H)
+    // ① Base — transparent in overlay mode, black otherwise
+    if (overlayMode.current) {
+      ctx.clearRect(0, 0, W, H)
+    } else {
+      ctx.fillStyle = '#000'
+      ctx.fillRect(0, 0, W, H)
+    }
 
-    // ② Matrix rain (behind video)
+    // ② Matrix rain (behind video; still drawn in overlay for ambience)
     matrixRef.current?.draw(ctx, t)
 
-    // ③ Webcam frame (blended over rain)
-    if (video && video.readyState >= 2) {
-      ctx.drawImage(video, 0, 0, W, H)
+    // ③ Webcam frame (skipped in overlay — OBS composites the real camera underneath)
+    if (!overlayMode.current && video && video.readyState >= 2) {
+      ctx.save()
+      ctx.scale(-1, 1)
+      ctx.drawImage(video, -W, 0, W, H)
+      ctx.restore()
     }
 
     // ③.5 Hand skeleton overlay (neon finger web, on top of video)
     const handLandmarks = gestureRef.current?.getHandLandmarks()
     if (handLandmarks && !stealthModeRef.current) {
-      drawHandSkeleton(ctx, handLandmarks, W, H, lastGestureRef.current, t)
+      // Mirror landmarks to match flipped video
+      const mirrored = handLandmarks.map(lm => ({ ...lm, x: 1 - lm.x }))
+      drawHandSkeleton(ctx, mirrored, W, H, lastGestureRef.current, t)
     }
 
-    // ④ Vignette for HUD readability
-    const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.2, W / 2, H / 2, H * 0.8)
-    grad.addColorStop(0, 'rgba(0,0,0,0)')
-    grad.addColorStop(1, 'rgba(0,0,0,0.48)')
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, W, H)
+    // ④ Vignette for HUD readability (skipped in overlay — OBS handles compositing)
+    if (!overlayMode.current) {
+      const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.2, W / 2, H / 2, H * 0.8)
+      grad.addColorStop(0, 'rgba(0,0,0,0)')
+      grad.addColorStop(1, 'rgba(0,0,0,0.48)')
+      ctx.fillStyle = grad
+      ctx.fillRect(0, 0, W, H)
+    }
 
     // ⑤ HUD chrome (rings + stealth/alert theming + waveform)
     const connStatuses = Object.values(connectorDataRef.current).map(c => ({
@@ -320,14 +410,23 @@ export function HUDCanvas() {
     const waveformRaw  = audioEngine.getWaveformData()
     const waveformNorm = normalizeWaveform(waveformRaw)
 
-    drawHUDChrome(ctx, W, H, t, connStatuses, alertLevel, waveformNorm ?? undefined)
+    drawHUDChrome(ctx, W, H, t, connStatuses, alertLevel, waveformNorm ?? undefined, 'inactive')
 
     // ⑥ Widgets (skipped in stealth mode)
     if (!stealthModeRef.current) {
-      drawWidgets(
-        ctx, activeWidgetsRef.current, connectorDataRef.current, birthTimes.current, now,
-        searchQueryRef.current, searchResultRef.current, searchLoadingRef.current,
-      )
+      // Sprint + Issues side panels
+      drawWidgets(ctx, activeWidgetsRef.current, connectorDataRef.current, birthTimes.current, now, notificationsRef.current, activityFeedRef.current, bootTimeRef.current, transcriptPanelRef.current as Parameters<typeof drawWidgets>[8])
+
+      // Iron Man Intel Card — face-overlay popup for search results
+      const isSearchActive = searchLoadingRef.current || searchResultRef.current !== null
+      if (isSearchActive) {
+        const cardAge = intelCardShownAtRef.current ? now - intelCardShownAtRef.current : 0
+        const lockAge = searchResultRef.current && intelCardShownAtRef.current
+          ? now - intelCardShownAtRef.current
+          : 0
+        drawFaceScanRing(ctx, t, searchLoadingRef.current, lockAge)
+        drawIntelCard(ctx, W, H, searchQueryRef.current, searchResultRef.current, searchLoadingRef.current, cardAge)
+      }
     }
 
     // ⑦ Command feedback
@@ -347,8 +446,8 @@ export function HUDCanvas() {
     return () => cancelAnimationFrame(rafRef.current)
   }, [render])
 
-  // ─── Error fallback ───────────────────────────────────────────────────────────
-  if (error) {
+  // ─── Error fallback (suppressed in overlay mode — OBS has no camera access) ──
+  if (error && !overlayMode.current) {
     return (
       <div style={{
         width: '100vw', height: '100vh', background: '#000',
@@ -375,7 +474,7 @@ export function HUDCanvas() {
         ref={canvasRef}
         width={W}
         height={H}
-        style={{ width: '100vw', height: '100vh', objectFit: 'contain', display: 'block', background: '#000' }}
+        style={{ width: '100vw', height: '100vh', objectFit: 'contain', display: 'block', background: overlayMode.current ? 'transparent' : '#000' }}
       />
     </>
   )

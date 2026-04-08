@@ -1,215 +1,162 @@
 // CIPHER — GestureEngine
-// MediaPipe Hands → gesture detection → HUD commands
-// Loads model from CDN to avoid bundling the large WASM binary
+// MediaPipe Hands → finger-counting gesture detection → HUD commands
 
 import type { GestureType, HUDAction, WidgetId } from '../types'
 
 type Dispatch = (action: HUDAction) => void
 
-// Extended gesture type — superset of GestureType for internal classification.
-// New gestures are not added to the public GestureType union (types/index.ts stays
-// untouched). They dispatch via COMMAND_RECEIVED instead of GESTURE_DETECTED.
-type ExtendedGestureType =
-  | GestureType
-  | 'thumbs_up'
-  | 'thumbs_down'
-  | 'peace_sign'
-  | 'point_up'
-  | 'fist'
-  | 'rock_on'
-  | 'call_me'
-
-// Landmark indices per MediaPipe hand model
-const WRIST = 0
-const TIPS  = [4, 8, 12, 16, 20]  // thumb, index, middle, ring, pinky
-const PIPS  = [2, 6, 10, 14, 18]  // corresponding PIP joints (used as extension baseline)
-
 interface Landmark { x: number; y: number; z: number }
 
-// ─── Gesture classifiers ──────────────────────────────────────────────────────
-function isOpenPalm(lm: Landmark[]): boolean {
-  // All fingers must be extended: tip.y < pip.y (screen coords, y=0 at top)
-  // Thumb uses x-axis extension check (thumb tip further from wrist x than pip)
-  const thumbExtended = Math.abs(lm[4].x - lm[0].x) > Math.abs(lm[2].x - lm[0].x)
-  const fingersExtended = [1, 2, 3, 4].every(i => lm[TIPS[i]].y < lm[PIPS[i]].y - 0.02)
-  return thumbExtended && fingersExtended
+// ─── Finger-to-widget group mapping ─────────────────────────────────────────
+// Each finger maps to a group of widgets toggled together.
+// Finger 1: Sprint + Issues (group); Fingers 2-4: single panel each.
+const FINGER_WIDGETS: WidgetId[][] = [
+  ['sprint', 'issues'],   // finger 1
+  ['github'],             // finger 2
+  ['calendar'],           // finger 3
+  ['notifications'],      // finger 4
+]
+
+// All panels dispatched on open palm (5 fingers)
+const ALL_PANELS: WidgetId[] = [
+  'sprint', 'issues', 'github', 'calendar',
+  'notifications', 'activity', 'metrics',
+]
+
+// Base gesture types that can be dispatched via GESTURE_DETECTED
+const BASE_GESTURES: GestureType[] = ['open_palm', 'swipe_left', 'swipe_right']
+
+// ─── Finger classification ───────────────────────────────────────────────────
+
+function isThumbExtended(lm: Landmark[]): boolean {
+  return Math.abs(lm[4].x - lm[2].x) > 0.06
 }
 
-function isPinch(lm: Landmark[]): boolean {
-  const dx = lm[4].x - lm[8].x
-  const dy = lm[4].y - lm[8].y
-  const dist = Math.sqrt(dx * dx + dy * dy)
-  return dist < 0.06
+function countExtendedFingers(lm: Landmark[]): number {
+  let count = 0
+  if (isThumbExtended(lm)) count++
+  if (lm[8].y < lm[6].y - 0.02) count++
+  if (lm[12].y < lm[10].y - 0.02) count++
+  if (lm[16].y < lm[14].y - 0.02) count++
+  if (lm[20].y < lm[18].y - 0.02) count++
+  return count
 }
 
-// ─── New classifiers ──────────────────────────────────────────────────────────
+function countNonThumbExtended(lm: Landmark[]): number {
+  let count = 0
+  if (lm[8].y < lm[6].y - 0.02) count++
+  if (lm[12].y < lm[10].y - 0.02) count++
+  if (lm[16].y < lm[14].y - 0.02) count++
+  if (lm[20].y < lm[18].y - 0.02) count++
+  return count
+}
 
-// Thumbs up: thumb tip well above IP joint, all 4 fingers curled
+// ─── Gesture classifiers ─────────────────────────────────────────────────────
+
 function isThumbsUp(lm: Landmark[]): boolean {
-  const thumbUp = lm[4].y < lm[2].y - 0.08
-  const fingersCurled =
-    lm[8].y  > lm[6].y  &&
-    lm[12].y > lm[10].y &&
-    lm[16].y > lm[14].y &&
-    lm[20].y > lm[18].y
-  return thumbUp && fingersCurled
+  return isThumbExtended(lm) && countNonThumbExtended(lm) === 0
 }
 
-// Thumbs down: thumb tip well below IP joint, all 4 fingers curled
-function isThumbsDown(lm: Landmark[]): boolean {
-  const thumbDown = lm[4].y > lm[2].y + 0.08
-  const fingersCurled =
-    lm[8].y  > lm[6].y  &&
-    lm[12].y > lm[10].y &&
-    lm[16].y > lm[14].y &&
-    lm[20].y > lm[18].y
-  return thumbDown && fingersCurled
-}
-
-// Peace / V-sign: index + middle extended, ring + pinky curled
-function isPeaceSign(lm: Landmark[]): boolean {
-  return (
-    lm[8].y  < lm[6].y  - 0.04 &&
-    lm[12].y < lm[10].y - 0.04 &&
-    lm[16].y > lm[14].y        &&
-    lm[20].y > lm[18].y
-  )
-}
-
-// Point up: index extended only, other fingers curled
-function isPointUp(lm: Landmark[]): boolean {
-  return (
-    lm[8].y  < lm[6].y  - 0.05 &&
-    lm[12].y > lm[10].y        &&
-    lm[16].y > lm[14].y        &&
-    lm[20].y > lm[18].y
-  )
-}
-
-// Fist: all fingertips below MCP joints, thumb tucked toward index MCP
 function isFist(lm: Landmark[]): boolean {
-  const fingersCurled =
-    lm[8].y  > lm[5].y  &&
-    lm[12].y > lm[9].y  &&
-    lm[16].y > lm[13].y &&
-    lm[20].y > lm[17].y
-  const thumbTucked = Math.abs(lm[4].x - lm[5].x) < 0.08
-  return fingersCurled && thumbTucked
+  return countExtendedFingers(lm) === 0 && !isThumbExtended(lm)
 }
 
-// Rock on (🤘): index + pinky extended, middle + ring curled
 function isRockOn(lm: Landmark[]): boolean {
-  return (
-    lm[8].y  < lm[6].y  - 0.04 &&
-    lm[20].y < lm[18].y - 0.04 &&
-    lm[12].y > lm[10].y        &&
-    lm[16].y > lm[14].y
-  )
+  const indexUp   = lm[8].y < lm[6].y - 0.02
+  const pinkyUp   = lm[20].y < lm[18].y - 0.02
+  const middleCurled = lm[12].y > lm[10].y - 0.01
+  const ringCurled   = lm[16].y > lm[14].y - 0.01
+  return indexUp && pinkyUp && middleCurled && ringCurled
 }
 
-// Call me (🤙): thumb + pinky extended, index + middle + ring curled
-function isCallMe(lm: Landmark[]): boolean {
-  const thumbExtended = Math.abs(lm[4].x - lm[2].x) > 0.08
-  return (
-    thumbExtended              &&
-    lm[20].y < lm[18].y - 0.04 &&
-    lm[8].y  > lm[6].y         &&
-    lm[12].y > lm[10].y        &&
-    lm[16].y > lm[14].y
-  )
-}
+// ─── Palm center (canvas pixel coords) ──────────────────────────────────────
+// Averages wrist + 4 knuckle bases; mirrors x for front-facing camera.
 
-// Track wrist positions for swipe detection
-const wristHistory: Array<{ x: number; t: number }> = []
-const SWIPE_WINDOW_MS = 600
-const SWIPE_THRESHOLD = 0.20  // fraction of screen width
-
-function detectSwipe(lm: Landmark[]): 'swipe_left' | 'swipe_right' | null {
-  const now = Date.now()
-  wristHistory.push({ x: lm[WRIST].x, t: now })
-
-  // Prune old history
-  const cutoff = now - SWIPE_WINDOW_MS
-  while (wristHistory.length > 0 && wristHistory[0].t < cutoff) wristHistory.shift()
-
-  if (wristHistory.length < 4) return null
-
-  const dx = wristHistory[wristHistory.length - 1].x - wristHistory[0].x
-  if (Math.abs(dx) > SWIPE_THRESHOLD) {
-    wristHistory.length = 0  // reset after detecting
-    return dx > 0 ? 'swipe_right' : 'swipe_left'
+function getPalmCenter(lm: Landmark[], canvasW: number, canvasH: number): { x: number; y: number } {
+  const ids = [0, 5, 9, 13, 17]
+  let cx = 0, cy = 0
+  for (const id of ids) {
+    cx += (1 - lm[id].x)
+    cy += lm[id].y
   }
-  return null
+  return {
+    x: (cx / ids.length) * canvasW,
+    y: (cy / ids.length) * canvasH,
+  }
 }
+
+// ─── Extended gesture type ───────────────────────────────────────────────────
+type ExtendedGestureType =
+  | GestureType
+  | 'fist'
+  | 'thumbs_up'
+  | 'rock_on'
+  | 'finger_1'
+  | 'finger_2'
+  | 'finger_3'
+  | 'finger_4'
 
 // ─── Fist hold state ─────────────────────────────────────────────────────────
 let fistHoldStart: number | null = null
-const FIST_HOLD_MS = 1200
+const FIST_HOLD_MS = 800
 
-// ─── Widget cycling (swipe toggles between sprint / issues) ──────────────────
-const CYCLE_WIDGETS: WidgetId[] = ['sprint', 'issues']
-let cycleIndex = 0
+// ─── Action dispatcher ───────────────────────────────────────────────────────
 
-// Base gesture types that can be dispatched via GESTURE_DETECTED
-const BASE_GESTURES: GestureType[] = ['open_palm', 'pinch', 'swipe_left', 'swipe_right']
-
-function handleGesture(gesture: ExtendedGestureType, dispatch: Dispatch, activeWidgets: Set<WidgetId>) {
-  // Only dispatch GESTURE_DETECTED for the base public gesture types
+function handleGesture(
+  gesture: ExtendedGestureType,
+  dispatch: Dispatch,
+  activeWidgets: Set<WidgetId>,
+  palmX: number,
+  palmY: number,
+) {
   if (BASE_GESTURES.includes(gesture as GestureType)) {
     dispatch({ type: 'GESTURE_DETECTED', gesture: gesture as GestureType })
   }
 
   switch (gesture) {
+    // 5 fingers — show ALL panels
     case 'open_palm': {
-      // Summon the first widget that isn't active, or dismiss all if all active
-      const anyActive = CYCLE_WIDGETS.some(id => activeWidgets.has(id))
-      if (!anyActive) {
-        dispatch({ type: 'SHOW_WIDGET', id: 'sprint' })
-      } else {
-        dispatch({ type: 'HIDE_ALL' })
+      dispatch({ type: 'COMMAND_RECEIVED', text: 'show all panels' })
+      for (const id of ALL_PANELS) {
+        dispatch({ type: 'SHOW_WIDGET', id })
       }
       break
     }
-    case 'pinch':
+
+    // Fist (held 800ms) — close all panels
+    case 'fist':
       dispatch({ type: 'HIDE_ALL' })
       break
-    case 'swipe_right': {
-      cycleIndex = (cycleIndex + 1) % CYCLE_WIDGETS.length
-      const next = CYCLE_WIDGETS[cycleIndex]
-      dispatch({ type: 'SHOW_WIDGET', id: next })
-      break
-    }
-    case 'swipe_left': {
-      cycleIndex = (cycleIndex - 1 + CYCLE_WIDGETS.length) % CYCLE_WIDGETS.length
-      const prev = CYCLE_WIDGETS[cycleIndex]
-      dispatch({ type: 'SHOW_WIDGET', id: prev })
-      break
-    }
+
+    // Thumbs up — toggle stealth mode
     case 'thumbs_up':
-      dispatch({ type: 'COMMAND_RECEIVED', text: '👍 confirmed' })
+      dispatch({ type: 'TOGGLE_STEALTH' })
       break
-    case 'thumbs_down':
-      dispatch({ type: 'COMMAND_RECEIVED', text: '👎 dismissed' })
-      break
-    case 'peace_sign':
-      dispatch({ type: 'SHOW_WIDGET', id: 'issues' })
-      break
-    case 'point_up':
-      dispatch({ type: 'COMMAND_RECEIVED', text: '↑ scroll up' })
-      break
-    case 'fist':
-      dispatch({ type: 'COMMAND_RECEIVED', text: '✊ data frozen' })
-      break
+
+    // Rock on — toggle interactive mode (transcript panel at palm)
     case 'rock_on':
-      dispatch({ type: 'COMMAND_RECEIVED', text: '🤘 stealth toggle' })
+      dispatch({ type: 'TOGGLE_TRANSCRIPT', x: palmX, y: palmY })
       break
-    case 'call_me':
-      dispatch({ type: 'COMMAND_RECEIVED', text: '📞 speaking summary' })
+
+    // 1-4 fingers — toggle widget groups
+    case 'finger_1':
+    case 'finger_2':
+    case 'finger_3':
+    case 'finger_4': {
+      const idx = Number(gesture.split('_')[1]) - 1
+      const group = FINGER_WIDGETS[idx]
+      const allActive = group.every(id => activeWidgets.has(id))
+      if (allActive) {
+        for (const id of group) dispatch({ type: 'HIDE_WIDGET', id })
+      } else {
+        for (const id of group) dispatch({ type: 'SHOW_WIDGET', id })
+      }
       break
+    }
   }
 }
 
-// ─── GestureEngine class ──────────────────────────────────────────────────────
+// ─── GestureEngine class ─────────────────────────────────────────────────────
 export class GestureEngine {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private landmarker: any = null
@@ -218,16 +165,23 @@ export class GestureEngine {
   private rafId: number | null = null
   private lastGestureTime = 0
   private lastGesture: ExtendedGestureType | null = null
-  private COOLDOWN_MS = 800
+  private COOLDOWN_MS = 600
   private activeWidgets: Set<WidgetId> = new Set()
   private lastLandmarks: Landmark[] | null = null
+  private lastDetectTime = 0
+  private canvasW = 1280
+  private canvasH = 720
+
+  setCanvasSize(w: number, h: number) {
+    this.canvasW = w
+    this.canvasH = h
+  }
 
   async init(videoEl: HTMLVideoElement, dispatch: Dispatch): Promise<boolean> {
     this.videoEl  = videoEl
     this.dispatch = dispatch
 
     try {
-      // Dynamic import to avoid loading WASM at startup
       const { HandLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision')
 
       const vision = await FilesetResolver.forVisionTasks(
@@ -256,7 +210,6 @@ export class GestureEngine {
     this.activeWidgets = widgets
   }
 
-  /** Returns the most-recently detected hand landmarks (21 points) or null if no hand in frame */
   getHandLandmarks(): Landmark[] | null {
     return this.lastLandmarks
   }
@@ -276,7 +229,6 @@ export class GestureEngine {
 
     if (!this.videoEl || !this.landmarker || this.videoEl.readyState < 2) return
 
-    // Only run inference at ~10fps to save CPU
     const now = performance.now()
     if (now - this.lastDetectTime < 100) return
     this.lastDetectTime = now
@@ -285,8 +237,7 @@ export class GestureEngine {
       const results = this.landmarker.detectForVideo(this.videoEl, now)
       if (!results.landmarks || results.landmarks.length === 0) {
         this.lastLandmarks = null
-        wristHistory.length = 0  // reset swipe on hand loss
-        fistHoldStart = null     // reset fist hold on hand loss
+        fistHoldStart = null
         return
       }
 
@@ -294,8 +245,6 @@ export class GestureEngine {
       this.classifyAndDispatch(lm)
     } catch { /* ignore frame errors */ }
   }
-
-  private lastDetectTime = 0
 
   private classifyAndDispatch(lm: Landmark[]) {
     this.lastLandmarks = lm
@@ -305,51 +254,47 @@ export class GestureEngine {
 
     let detected: ExtendedGestureType | null = null
 
-    // Priority order: swipe → fist (with hold) → pinch → thumbs_up → thumbs_down
-    //                 → peace_sign → rock_on → call_me → point_up → open_palm
-    const swipe = detectSwipe(lm)
-    if (swipe) {
-      detected = swipe
+    // ── Priority order: Rock On → Fist (with hold) → Thumbs Up → Finger Count ──
+
+    if (isRockOn(lm)) {
+      detected = 'rock_on'
       fistHoldStart = null
     } else if (isFist(lm)) {
       if (fistHoldStart === null) {
         fistHoldStart = now
       } else if (now - fistHoldStart >= FIST_HOLD_MS) {
         detected = 'fist'
-        fistHoldStart = null  // reset after firing
+        fistHoldStart = null
       }
-      // Fist not held long enough yet — don't fall through to other classifiers
       if (detected === null) {
-        // Reset last gesture so we don't block re-detection once hold completes
         this.lastGesture = null
         return
       }
     } else {
-      fistHoldStart = null  // clear hold state if fist released
+      fistHoldStart = null
 
-      if (isPinch(lm)) {
-        detected = 'pinch'
-      } else if (isThumbsUp(lm)) {
+      if (isThumbsUp(lm)) {
         detected = 'thumbs_up'
-      } else if (isThumbsDown(lm)) {
-        detected = 'thumbs_down'
-      } else if (isPeaceSign(lm)) {
-        detected = 'peace_sign'
-      } else if (isRockOn(lm)) {
-        detected = 'rock_on'
-      } else if (isCallMe(lm)) {
-        detected = 'call_me'
-      } else if (isPointUp(lm)) {
-        detected = 'point_up'
-      } else if (isOpenPalm(lm)) {
-        detected = 'open_palm'
+      } else {
+        const count = countExtendedFingers(lm)
+        if (count === 5) {
+          detected = 'open_palm'
+        } else if (count >= 1 && count <= 4) {
+          const nonThumb = countNonThumbExtended(lm)
+          if (nonThumb >= 1 && nonThumb <= 4) {
+            detected = `finger_${nonThumb}` as ExtendedGestureType
+          }
+        }
       }
     }
 
     if (detected && detected !== this.lastGesture) {
       this.lastGestureTime = now
       this.lastGesture = detected
-      handleGesture(detected, this.dispatch, this.activeWidgets)
+      const palm = this.lastLandmarks
+        ? getPalmCenter(this.lastLandmarks, this.canvasW, this.canvasH)
+        : { x: 0, y: 0 }
+      handleGesture(detected, this.dispatch, this.activeWidgets, palm.x, palm.y)
     } else if (!detected) {
       this.lastGesture = null
     }

@@ -1,11 +1,10 @@
 // CIPHER — App root
 // Provides HUD context, mounts canvas + floating controls + settings drawer
 
-import { useReducer, useRef } from 'react'
+import { useReducer } from 'react'
 import { HUDContext, hudReducer, initialHUDState } from './store/hudStore'
 import { HUDCanvas } from './canvas/HUDCanvas'
 import { ConfigDrawer } from './components/ConfigDrawer'
-import type { HUDState } from './types'
 
 const ALERT_COLORS: Record<string, string> = {
   NORMAL:   'rgba(0, 255, 65, 0.8)',
@@ -27,10 +26,33 @@ const HUD_BTN: React.CSSProperties = {
   backdropFilter: 'blur(4px)',
 }
 
+const CYAN_BTN: React.CSSProperties = {
+  ...HUD_BTN,
+  border: '1px solid rgba(0, 200, 255, 0.30)',
+  color:  'rgba(0, 200, 255, 0.8)',
+}
+
+const AMBER_BTN: React.CSSProperties = {
+  ...HUD_BTN,
+  border: '1px solid rgba(255, 160, 0, 0.30)',
+  color:  'rgba(255, 160, 0, 0.8)',
+}
+
+type WidgetBtn = { id: 'sprint' | 'issues' | 'github' | 'calendar' | 'notifications' | 'activity' | 'metrics'; label: string; theme: 'green' | 'cyan' | 'amber' }
+
+const WIDGET_BUTTONS: WidgetBtn[] = [
+  { id: 'sprint',        label: 'OVERVIEW',  theme: 'green' },
+  { id: 'issues',        label: 'TICKETS',   theme: 'green' },
+  { id: 'github',        label: 'GITHUB',    theme: 'cyan' },
+  { id: 'calendar',      label: 'CALENDAR',  theme: 'cyan' },
+  { id: 'notifications', label: 'NOTIFS',    theme: 'amber' },
+  { id: 'activity',      label: 'ACTIVITY',  theme: 'green' },
+  { id: 'metrics',       label: 'METRICS',   theme: 'green' },
+]
+
 export default function App() {
   const [state, dispatch] = useReducer(hudReducer, initialHUDState)
-  const stateRef = useRef<HUDState>(state)
-  stateRef.current = state
+  const isOverlay = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('overlay')
 
   const alertColor = ALERT_COLORS[state.alertLevel] ?? ALERT_COLORS.NORMAL
 
@@ -38,8 +60,8 @@ export default function App() {
     <HUDContext.Provider value={{ state, dispatch }}>
       <HUDCanvas />
 
-      {/* ── Top-left: settings + stealth ───────────────────────────── */}
-      <div style={{ position: 'fixed', top: 20, left: 20, display: 'flex', gap: 8, zIndex: 50 }}>
+      {/* ── Top-left: settings + stealth (hidden in OBS overlay mode) ── */}
+      {!isOverlay && <div style={{ position: 'fixed', top: 20, left: 20, display: 'flex', gap: 8, zIndex: 50 }}>
         <button
           onClick={() => dispatch({ type: 'TOGGLE_CONFIG' })}
           style={{ ...HUD_BTN, color: alertColor, borderColor: alertColor.replace('0.8', '0.35') }}
@@ -71,28 +93,33 @@ export default function App() {
             {state.alertLevel === 'ALERT' ? '⚠ ALERT' : '🔴 CRITICAL'}
           </div>
         )}
-      </div>
+      </div>}
 
-      {/* ── Bottom-right: widget toggles ───────────────────────────── */}
-      <div style={{
+      {/* ── Bottom-right: widget toggles (hidden in OBS overlay mode) ── */}
+      {!isOverlay && <div style={{
         position: 'fixed', bottom: 40, right: 20,
-        display: 'flex', flexDirection: 'column', gap: 8, zIndex: 50,
+        display: 'flex', flexDirection: 'column', gap: 6, zIndex: 50,
       }}>
-        {(['sprint', 'issues'] as const).map(id => {
+        {WIDGET_BUTTONS.map(({ id, label, theme }) => {
           const active = state.activeWidgets.has(id)
+          const base = theme === 'cyan' ? CYAN_BTN : theme === 'amber' ? AMBER_BTN : HUD_BTN
+          const activeColor = theme === 'cyan' ? '#00c8ff' : theme === 'amber' ? '#ffa000' : '#00ff41'
+          const activeBg = theme === 'cyan' ? 'rgba(0,200,255,0.12)' : theme === 'amber' ? 'rgba(255,160,0,0.10)' : 'rgba(0,255,65,0.12)'
           return (
             <button
               key={id}
               onClick={() => dispatch({ type: active ? 'HIDE_WIDGET' : 'SHOW_WIDGET', id })}
               style={{
-                ...HUD_BTN,
-                background:  active ? 'rgba(0, 255, 65, 0.12)' : 'rgba(0, 20, 0, 0.75)',
-                borderColor: active ? 'rgba(0, 255, 65, 0.75)'  : 'rgba(0, 255, 65, 0.22)',
-                color:       active ? '#00ff41'                  : 'rgba(0, 255, 65, 0.42)',
-                textShadow:  active ? '0 0 8px #00ff41'         : 'none',
+                ...base,
+                fontSize: 9,
+                padding: '4px 10px',
+                background:  active ? activeBg : 'rgba(0, 20, 0, 0.75)',
+                borderColor: active ? activeColor : base.border?.toString().match(/rgba\([^)]+\)/)?.[0] ?? 'rgba(0,255,65,0.22)',
+                color:       active ? activeColor : (base.color as string).replace('0.8', '0.42'),
+                textShadow:  active ? `0 0 8px ${activeColor}` : 'none',
               }}
             >
-              {id.toUpperCase()}
+              {label}
             </button>
           )
         })}
@@ -101,12 +128,12 @@ export default function App() {
         {state.alertLevel === 'CRITICAL' && (
           <button
             onClick={() => dispatch({ type: 'SET_ALERT_LEVEL', level: 'NORMAL' })}
-            style={{ ...HUD_BTN, color: 'rgba(255,50,50,0.8)', borderColor: 'rgba(255,50,50,0.4)' }}
+            style={{ ...HUD_BTN, fontSize: 9, padding: '4px 10px', color: 'rgba(255,50,50,0.8)', borderColor: 'rgba(255,50,50,0.4)' }}
           >
-            ✕ RESET ALERT
+            ✕ RESET
           </button>
         )}
-      </div>
+      </div>}
 
       {/* ── CSS for critical pulse animation ───────────────────────── */}
       <style>{`
@@ -116,7 +143,7 @@ export default function App() {
         }
       `}</style>
 
-      <ConfigDrawer />
+      {!isOverlay && <ConfigDrawer />}
     </HUDContext.Provider>
   )
 }

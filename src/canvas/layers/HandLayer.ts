@@ -167,7 +167,18 @@ export function drawHandSkeleton(
     ctx.fillStyle    = '#00ff41'
     ctx.shadowBlur   = 14
     ctx.shadowColor  = '#00ff41'
-    const label = lastGesture.type.replace(/_/g, ' ').toUpperCase()
+    const GESTURE_LABELS: Record<string, string> = {
+      open_palm: '✋ SHOW ALL',
+      fist: '✊ STEALTH',
+      pinch: '🤏 CLOSE ALL',
+      rock_on: '🤘 LISTENING',
+      finger_1: '☝ OVERVIEW',
+      finger_2: '✌ ISSUES',
+      finger_3: '🤟 GITHUB',
+      finger_4: '🖖 CALENDAR',
+      thumbs_up: '👍 CONFIRMED',
+    }
+    const label = GESTURE_LABELS[lastGesture.type] ?? lastGesture.type.replace(/_/g, ' ').toUpperCase()
     ctx.fillText(`◈ ${label}`, lx(wrist, w), ly(wrist, h) + 24)
     ctx.globalAlpha = 1
     noGlow(ctx)

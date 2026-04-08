@@ -28,7 +28,7 @@ export interface MatrixRainOptions {
 // Per-AlertLevel config
 const LEVEL_CONFIG: Record<AlertLevel, { opacity: number; density: number; speedScale: number }> = {
   STEALTH:  { opacity: 0,    density: 0,    speedScale: 1.0 },
-  NORMAL:   { opacity: 0.18, density: 0.4,  speedScale: 0.8 },
+  NORMAL:   { opacity: 0.30, density: 0.55, speedScale: 0.85 },
   ALERT:    { opacity: 0.38, density: 0.75, speedScale: 1.3 },
   CRITICAL: { opacity: 0.60, density: 1.0,  speedScale: 2.0 },
 }

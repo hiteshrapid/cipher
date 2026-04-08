@@ -37,19 +37,16 @@ export function ConfigDrawer() {
           </ol>
         </section>
 
-        {/* Jira Config */}
+        {/* Linear Config */}
         <section className="drawer-section">
-          <h3>Jira Connector</h3>
-          {state.config.jiraConfigured ? (
+          <h3>Linear Connector</h3>
+          {state.config.linearConfigured ? (
             <div className="config-status connected">◉ Connected</div>
           ) : (
             <div className="config-instructions">
               <p>Add to <code>.env.local</code> in the project root and restart:</p>
-              <pre>{`VITE_JIRA_URL=https://yourcompany.atlassian.net
-VITE_JIRA_EMAIL=you@company.com
-VITE_JIRA_TOKEN=your-api-token
-VITE_JIRA_BOARD_ID=1`}</pre>
-              <p className="hint">Get your API token at: <code>id.atlassian.com → Security → API tokens</code></p>
+              <pre>{`VITE_LINEAR_TOKEN=lin_api_your-token`}</pre>
+              <p className="hint">Get your API key at: <code>linear.app/settings/api</code></p>
             </div>
           )}
         </section>
@@ -78,18 +75,9 @@ VITE_JIRA_BOARD_ID=1`}</pre>
           </section>
         )}
 
-        {/* Voice + gesture toggles */}
+        {/* Gesture control toggle */}
         <section className="drawer-section">
           <h3>Controls</h3>
-          <div className="toggle-row">
-            <span>Voice Commands</span>
-            <button
-              className={`toggle-btn ${state.config.voiceEnabled ? 'on' : 'off'}`}
-              onClick={() => dispatch({ type: 'SET_CONFIG', config: { voiceEnabled: !state.config.voiceEnabled } })}
-            >
-              {state.config.voiceEnabled ? 'ON' : 'OFF'}
-            </button>
-          </div>
           <div className="toggle-row">
             <span>Gesture Control</span>
             <button
@@ -101,28 +89,19 @@ VITE_JIRA_BOARD_ID=1`}</pre>
           </div>
         </section>
 
-        {/* Voice command reference */}
-        <section className="drawer-section">
-          <h3>Voice Commands</h3>
-          <table className="cmd-table">
-            <tbody>
-              <tr><td>"show sprint"</td><td>Show sprint status panel</td></tr>
-              <tr><td>"show issues"</td><td>Show my open issues</td></tr>
-              <tr><td>"hide all"</td><td>Clear all panels</td></tr>
-              <tr><td>"refresh"</td><td>Force data refresh</td></tr>
-            </tbody>
-          </table>
-        </section>
-
         {/* Gesture reference */}
         <section className="drawer-section">
           <h3>Gestures</h3>
           <table className="cmd-table">
             <tbody>
-              <tr><td>Open palm (hold 1s)</td><td>Toggle last panel</td></tr>
-              <tr><td>Pinch</td><td>Dismiss all panels</td></tr>
-              <tr><td>Swipe right</td><td>Next panel</td></tr>
-              <tr><td>Swipe left</td><td>Previous panel</td></tr>
+              <tr><td>🖐 Open Palm</td><td>Show all panels</td></tr>
+              <tr><td>✊ Fist (hold 800ms)</td><td>Close all panels</td></tr>
+              <tr><td>👍 Thumbs Up</td><td>Toggle stealth mode</td></tr>
+              <tr><td>🤘 Rock On</td><td>Toggle interactive voice mode</td></tr>
+              <tr><td>☝️ 1 finger</td><td>Toggle Sprint + Issues</td></tr>
+              <tr><td>✌️ 2 fingers</td><td>Toggle GitHub</td></tr>
+              <tr><td>🤟 3 fingers</td><td>Toggle Calendar</td></tr>
+              <tr><td>🖖 4 fingers</td><td>Toggle Notifications</td></tr>
             </tbody>
           </table>
         </section>
