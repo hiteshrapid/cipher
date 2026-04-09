@@ -203,7 +203,7 @@ export function HUDCanvas() {
     const slackData = state.connectorData['slack']?.data as unknown as SlackData | undefined
     const gmailData = state.connectorData['gmail']?.data as unknown as GmailData | undefined
 
-    // Slack mentions → notifications + activity
+    // Slack mentions → notifications only
     if (slackData?.mentions) {
       for (const msg of slackData.mentions) {
         const key = `${msg.channel}-${msg.timestamp}`
@@ -218,14 +218,10 @@ export function HUDCanvas() {
             priority: 'normal',
           },
         })
-        dispatch({
-          type: 'ADD_ACTIVITY',
-          item: { source: 'slack', text: `${msg.author}: ${msg.text}`, timestamp: new Date(msg.timestamp).getTime(), icon: '\u{1F4AC}' },
-        })
       }
     }
 
-    // Slack DMs → high priority
+    // Slack DMs → high priority notifications
     if (slackData?.recentDMs) {
       for (const dm of slackData.recentDMs) {
         const key = `dm-${dm.author}-${dm.timestamp}`
@@ -243,20 +239,11 @@ export function HUDCanvas() {
       }
     }
 
-    // Gmail → notifications + activity
+    // Gmail → activity feed only
     if (gmailData?.recentThreads) {
       for (const thread of gmailData.recentThreads) {
         if (seenGmailKeys.current.has(thread.id)) continue
         seenGmailKeys.current.add(thread.id)
-        dispatch({
-          type: 'ADD_NOTIFICATION',
-          item: {
-            source: 'gmail',
-            text: `${thread.from}: ${thread.subject}`,
-            timestamp: new Date(thread.timestamp).getTime(),
-            priority: thread.unread ? 'high' : 'normal',
-          },
-        })
         dispatch({
           type: 'ADD_ACTIVITY',
           item: { source: 'gmail', text: `${thread.from} \u2014 ${thread.subject}`, timestamp: new Date(thread.timestamp).getTime(), icon: '\u{1F4E7}' },
@@ -314,9 +301,8 @@ export function HUDCanvas() {
       dispatch({ type: 'SET_CONFIG', config: { linearConfigured: true } })
     }
 
-    // Auto-show default widgets
+    // Auto-show default widgets (issues hidden until finger 1)
     dispatch({ type: 'SHOW_WIDGET', id: 'sprint' })
-    dispatch({ type: 'SHOW_WIDGET', id: 'issues' })
     dispatch({ type: 'SHOW_WIDGET', id: 'github' })
     dispatch({ type: 'SHOW_WIDGET', id: 'calendar' })
     dispatch({ type: 'SHOW_WIDGET', id: 'notifications' })

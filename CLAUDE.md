@@ -92,7 +92,7 @@ MediaPipe tracks 21 landmarks per hand at ~10fps. Priority order: Rock On → Fi
 
 | Gesture | Action |
 |---|---|
-| 🖐 Open Palm (5 fingers) | Show all panels |
+| 🖐 Open Palm (5 fingers) | Show all panels (except issues — finger 1 only) |
 | ✊ Fist (hold 800ms) | Close all panels (also closes transcript panel) |
 | 👍 Thumbs Up | (unassigned) |
 | 🤘 Rock On (index + pinky up) | Toggle InteractiveMode + transcript panel at palm |
@@ -129,8 +129,8 @@ Activated by Rock On. Deepgram streams live audio; Cartesia speaks responses.
 | `issues` | Left mid | Linear | Green |
 | `github` | Right top | GitHub | Cyan |
 | `calendar` | Right mid | Google Calendar | Cyan |
-| `notifications` | Right lower | Slack + Gmail + GitHub | Amber |
-| `activity` | Left bottom | All connectors | Green |
+| `notifications` | Right lower | Slack only (mentions + DMs) | Amber |
+| `activity` | Left bottom | Gmail only (recent threads) | Green |
 | `metrics` | Right bottom | Session uptime only | Green |
 | `search` | Centre overlay | SearchEngine (Intel Card) | Cyan |
 | `clock` | Ring (always on) | — | — |
@@ -150,7 +150,7 @@ All proxied server-side via `vite.config.ts`. Copy `.env.local.example` → `.en
 | `VITE_GITHUB_REPOS` | Comma-separated `owner/repo` pairs to track |
 | `VITE_GCAL_TOKEN` | Google OAuth2 access token |
 | `VITE_GCAL_CALENDAR_ID` | Calendar ID (default: `primary`) |
-| `VITE_SLACK_BOT_TOKEN` | Slack bot token (`xoxb-*`) |
+| `VITE_SLACK_BOT_TOKEN` | Slack user token (`xoxp-*`) — requires `search:read` scope |
 | `VITE_GMAIL_TOKEN` | Google OAuth2 token (gmail.readonly) |
 | `VITE_LINEAR_TOKEN` | Linear API key (`lin_api_*`) |
 | `VITE_OPENAI_API_KEY` | GPT-4o-mini for search summaries |
@@ -172,6 +172,16 @@ All proxied server-side via `vite.config.ts`. Copy `.env.local.example` → `.en
 **Widget groups in GestureEngine.** `FINGER_WIDGETS` is `WidgetId[][]`. Finger 1 maps to `['sprint', 'issues']`. The toggle logic checks if ALL widgets in the group are active before deciding to hide or show.
 
 **Alert level drives visuals.** `MatrixRainLayer` density/speed and `RingLayer` brightness/glow both scale with `alertLevel`.
+
+**Panel data specialisation.** Notifications panel shows Slack only (mentions + DMs). Activity feed shows Gmail only (recent threads). This avoids cross-duplication and gives each panel a clear purpose.
+
+**Boot defaults.** On startup, all panels except `issues` are shown. The `issues` (My Tickets) panel is only reachable via Finger 1 (which toggles both `sprint` + `issues` together) or voice command. Open Palm also excludes `issues`.
+
+**AudioContext early unlock.** Chrome suspends `AudioContext` until a DOM user gesture. `AudioEngine.init()` registers one-shot `click`/`keydown`/`touchstart` listeners that create and resume the context early, so TTS works when triggered by non-DOM gestures (e.g. MediaPipe hand detection).
+
+**Widget text clipping.** All widget draw functions apply `clipToPanel()` after entrance animation to prevent text overflow. Notification text is truncated at 32 chars, activity feed at 16 chars.
+
+**Slack requires user token.** The `search.messages` API requires a user token (`xoxp-*`) with `search:read` scope. Bot tokens (`xoxb-*`) return `not_allowed_token_type`. The `conversations.list` and `search.messages` responses are parsed independently — if one fails, the other still provides data.
 
 ---
 

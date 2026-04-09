@@ -19,31 +19,28 @@ export class SlackConnector implements Connector {
         fetch('/slack/api/conversations.list?limit=10', {
           headers: { 'Content-Type': 'application/json' },
         }),
-        fetch('/slack/api/search.messages?query=<@me>&count=5', {
+        fetch('/slack/api/search.messages?query=to:me&count=5', {
           headers: { 'Content-Type': 'application/json' },
         }),
       ])
 
-      if (!convRes.ok || !searchRes.ok) {
-        return this.mockData()
+      // Parse responses independently — one may fail while the other works
+      let unreadCount = 0
+      if (convRes.ok) {
+        const convJson = await convRes.json()
+        if (convJson.ok) {
+          const channels = (convJson.channels ?? []) as Array<{ num_unread?: number }>
+          unreadCount = channels.reduce(
+            (sum: number, ch: { num_unread?: number }) => sum + (ch.num_unread ?? 0),
+            0,
+          )
+        }
       }
 
-      const convJson = await convRes.json()
+      // Search is the main data source for mentions/DMs
+      if (!searchRes.ok) return this.mockData()
       const searchJson = await searchRes.json()
-
-      if (!convJson.ok || !searchJson.ok) {
-        return this.mockData()
-      }
-
-      const channels = (convJson.channels ?? []) as Array<{
-        is_im?: boolean
-        num_unread?: number
-      }>
-
-      const unreadCount = channels.reduce(
-        (sum: number, ch: { num_unread?: number }) => sum + (ch.num_unread ?? 0),
-        0,
-      )
+      if (!searchJson.ok) return this.mockData()
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const matches = (searchJson.messages?.matches ?? []) as any[]

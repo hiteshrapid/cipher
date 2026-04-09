@@ -36,6 +36,7 @@ async function speak(text: string): Promise<void> {
     const arrayBuffer = await res.arrayBuffer()
     // Reuse shared AudioContext — avoids suspended-context hang
     const audioCtx = await audioEngine.getSharedContext()
+    console.log('CIPHER TTS: AudioContext state:', audioCtx.state, '| audio bytes:', arrayBuffer.byteLength)
     const float32 = new Float32Array(arrayBuffer)
     const audioBuffer = audioCtx.createBuffer(1, float32.length, 24000)
     audioBuffer.getChannelData(0).set(float32)

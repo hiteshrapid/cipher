@@ -17,9 +17,9 @@ const FINGER_WIDGETS: WidgetId[][] = [
   ['notifications'],      // finger 4
 ]
 
-// All panels dispatched on open palm (5 fingers)
+// All panels dispatched on open palm (5 fingers) — issues excluded (finger 1 only)
 const ALL_PANELS: WidgetId[] = [
-  'sprint', 'issues', 'github', 'calendar',
+  'sprint', 'github', 'calendar',
   'notifications', 'activity', 'metrics',
 ]
 

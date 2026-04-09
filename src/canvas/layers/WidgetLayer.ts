@@ -117,6 +117,13 @@ function applyEntrance(ctx: CanvasRenderingContext2D, age: number) {
   ctx.translate((1 - progress) * -60, 0)
 }
 
+// ─── Clip to panel bounds (call after ctx.save + applyEntrance) ─────────────
+function clipToPanel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  ctx.beginPath()
+  ctx.rect(x, y, w, h)
+  ctx.clip()
+}
+
 // ─── Relative time helper ────────────────────────────────────────────────────
 function relativeTime(ts: number, now: number): string {
   const diff = Math.max(0, now - ts)
@@ -154,6 +161,7 @@ function drawLinearOverviewWidget(
 
   ctx.save()
   applyEntrance(ctx, age)
+  clipToPanel(ctx, x, y, W, H)
 
   if (!data) {
     ctx.font      = `10px ${C.font}`
@@ -262,6 +270,7 @@ function drawGitHubWidget(
 
   ctx.save()
   applyEntrance(ctx, age)
+  clipToPanel(ctx, x, y, W, H)
 
   if (!data) {
     ctx.font      = `10px ${CYAN.font}`
@@ -381,6 +390,7 @@ function drawCalendarWidget(
 
   ctx.save()
   applyEntrance(ctx, age)
+  clipToPanel(ctx, x, y, W, H)
 
   if (!data) {
     ctx.font      = `10px ${CYAN.font}`
@@ -480,6 +490,7 @@ function drawLinearAssignedWidget(
 
   ctx.save()
   applyEntrance(ctx, age)
+  clipToPanel(ctx, x, y, W, H)
 
   if (!data) {
     ctx.font      = `10px ${C.font}`
@@ -562,6 +573,7 @@ function drawNotificationsWidget(
 
   ctx.save()
   applyEntrance(ctx, age)
+  clipToPanel(ctx, x, y, W, H)
 
   if (items.length === 0) {
     ctx.font      = `10px ${AMBER.font}`
@@ -596,7 +608,7 @@ function drawNotificationsWidget(
     } else {
       ctx.fillStyle = item.priority === 'high' ? AMBER.primary : AMBER.mid
     }
-    const text = item.text.length > 50 ? item.text.slice(0, 50) + '…' : item.text
+    const text = item.text.length > 32 ? item.text.slice(0, 32) + '…' : item.text
     ctx.fillText(text, x + 46, curY + 1)
     if (isNew) noGlow(ctx)
 
@@ -627,6 +639,7 @@ function drawActivityFeedWidget(
 
   ctx.save()
   applyEntrance(ctx, age)
+  clipToPanel(ctx, x, y, W, H)
 
   if (items.length === 0) {
     ctx.font      = `10px ${C.font}`
@@ -656,7 +669,7 @@ function drawActivityFeedWidget(
     const itemAge = now - item.timestamp
     ctx.font      = `9px ${C.font}`
     ctx.fillStyle = itemAge < 30000 ? C.primary : C.mid
-    const text = item.text.length > 30 ? item.text.slice(0, 30) + '…' : item.text
+    const text = item.text.length > 16 ? item.text.slice(0, 16) + '…' : item.text
     ctx.fillText(text, x + 38 + (i % 3) * 130, curY + Math.floor(i / 3) * 22)
   })
 

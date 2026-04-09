@@ -28,6 +28,21 @@ export class AudioEngine {
 
     this.synth.onvoiceschanged = pickVoice
     pickVoice()  // run immediately for browsers that have voices synchronously
+
+    // Unlock AudioContext on first user interaction (click/keydown/touch)
+    // so TTS can play later without needing a DOM gesture
+    const unlock = () => {
+      if (!this.audioCtx) this.audioCtx = new AudioContext()
+      if (this.audioCtx.state === 'suspended') {
+        this.audioCtx.resume().catch(() => {})
+      }
+      document.removeEventListener('click', unlock)
+      document.removeEventListener('keydown', unlock)
+      document.removeEventListener('touchstart', unlock)
+    }
+    document.addEventListener('click', unlock, { once: true })
+    document.addEventListener('keydown', unlock, { once: true })
+    document.addEventListener('touchstart', unlock, { once: true })
   }
 
   // ─── Lazy AudioContext (with suspend recovery) ────────────────────────────────
