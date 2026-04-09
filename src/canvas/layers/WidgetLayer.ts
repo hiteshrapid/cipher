@@ -585,11 +585,20 @@ function drawNotificationsWidget(
     ctx.textAlign = 'left'
     ctx.fillText(srcLabel, x + 12, curY + 1)
 
-    // Text (truncated)
+    // Text (truncated) — pulse glow for items < 10s old
+    const itemAge = now - item.timestamp
+    const isNew = itemAge < 10000
     ctx.font      = `9px ${AMBER.font}`
-    ctx.fillStyle = item.priority === 'high' ? AMBER.primary : AMBER.mid
-    const text = item.text.length > 30 ? item.text.slice(0, 30) + '…' : item.text
+    if (isNew) {
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300)
+      ctx.fillStyle = `rgba(255, 160, 0, ${0.7 + pulse * 0.3})`
+      glow(ctx, 6, AMBER)
+    } else {
+      ctx.fillStyle = item.priority === 'high' ? AMBER.primary : AMBER.mid
+    }
+    const text = item.text.length > 50 ? item.text.slice(0, 50) + '…' : item.text
     ctx.fillText(text, x + 46, curY + 1)
+    if (isNew) noGlow(ctx)
 
     // Relative time
     ctx.textAlign = 'right'
@@ -643,9 +652,11 @@ function drawActivityFeedWidget(
     ctx.textAlign = 'left'
     ctx.fillText(timeStr.padEnd(4, ' '), x + 12 + (i % 3) * 130, curY + Math.floor(i / 3) * 22)
 
+    // Highlight recent items (< 30s old)
+    const itemAge = now - item.timestamp
     ctx.font      = `9px ${C.font}`
-    ctx.fillStyle = C.mid
-    const text = item.text.length > 18 ? item.text.slice(0, 18) + '…' : item.text
+    ctx.fillStyle = itemAge < 30000 ? C.primary : C.mid
+    const text = item.text.length > 30 ? item.text.slice(0, 30) + '…' : item.text
     ctx.fillText(text, x + 38 + (i % 3) * 130, curY + Math.floor(i / 3) * 22)
   })
 
@@ -974,10 +985,11 @@ function drawTranscriptPanel(
   ctx: CanvasRenderingContext2D,
   x: number, y: number,
   text: string,
+  systemText: string,
   age: number,
 ) {
   const W = 260
-  const H = 90
+  const H = systemText ? 110 : 90
   const progress = Math.min(1, age / 300)
   const eased    = 1 - Math.pow(1 - progress, 3)
 
@@ -1055,6 +1067,18 @@ function drawTranscriptPanel(
     ctx.fillRect(x + 10 + textW + 2, y + 34, 6, 11)
   }
 
+  // System response (cyan, below user text)
+  if (systemText) {
+    ctx.font         = `10px ${C.font}`
+    ctx.fillStyle    = 'rgba(0, 200, 255, 0.85)'
+    ctx.textAlign    = 'left'
+    ctx.textBaseline = 'top'
+    const sysDisplay = systemText.slice(-80)
+    glow(ctx, 6)
+    ctx.fillText(`▸ ${sysDisplay}`, x + 10, y + 52, W - 20)
+    noGlow(ctx)
+  }
+
   // Footer hint
   ctx.font      = `8px ${C.font}`
   ctx.fillStyle = C.dim
@@ -1075,7 +1099,7 @@ export function drawWidgets(
   notifications: NotificationItem[],
   activityFeed: ActivityItem[],
   bootTime: number,
-  transcriptPanel?: { active: boolean; x: number; y: number; text: string; bornAt?: number },
+  transcriptPanel?: { active: boolean; x: number; y: number; text: string; systemText?: string; bornAt?: number },
 ) {
   const githubData = connectorData['github']?.data as unknown as GitHubData | undefined
   const calData    = connectorData['calendar']?.data as unknown as CalendarData | undefined
@@ -1153,6 +1177,6 @@ export function drawWidgets(
 
   if (transcriptPanel?.active) {
     const age = transcriptPanel.bornAt != null ? now - transcriptPanel.bornAt : 300
-    drawTranscriptPanel(ctx, transcriptPanel.x, transcriptPanel.y, transcriptPanel.text, age)
+    drawTranscriptPanel(ctx, transcriptPanel.x, transcriptPanel.y, transcriptPanel.text, transcriptPanel.systemText ?? '', age)
   }
 }

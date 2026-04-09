@@ -10,7 +10,7 @@ import { drawWidgets, drawGestureFeedback, drawFaceScanRing, drawIntelCard } fro
 import { drawHandSkeleton } from './layers/HandLayer'
 import { MatrixRainLayer } from './layers/MatrixRainLayer'
 import { useHUD } from '../store/hudStore'
-import type { WidgetId, ConnectorData, SearchResult, NotificationItem, ActivityItem } from '../types'
+import type { WidgetId, ConnectorData, SearchResult, NotificationItem, ActivityItem, SlackData, GmailData } from '../types'
 import { GestureEngine } from '../engines/GestureEngine'
 import { audioEngine } from '../engines/AudioEngine'
 import { interactiveMode } from '../engines/InteractiveMode'
@@ -57,7 +57,6 @@ export function HUDCanvas() {
   const lastCommandRef   = useRef<{ text: string; timestamp: number } | null>(null)
   const lastGestureRef   = useRef<{ type: string; timestamp: number } | null>(null)
   const alertLevelRef    = useRef<AlertLevel>('NORMAL')
-  const stealthModeRef   = useRef(false)
   const searchQueryRef      = useRef<string | null>(null)
   const searchResultRef     = useRef<SearchResult | null>(null)
   const searchLoadingRef    = useRef(false)
@@ -82,7 +81,6 @@ export function HUDCanvas() {
     lastCommandRef.current   = state.lastCommand
     lastGestureRef.current   = state.lastGesture
     alertLevelRef.current    = state.alertLevel as AlertLevel
-    stealthModeRef.current   = state.stealthMode
     searchQueryRef.current   = state.searchQuery
     searchResultRef.current  = state.searchResult
     searchLoadingRef.current = state.searchLoading
@@ -137,7 +135,7 @@ export function HUDCanvas() {
       return
     }
 
-  }, [state.lastCommand, state.stealthMode, dispatch])
+  }, [state.lastCommand, dispatch])
 
   // ─── Smart search (OpenAI → DuckDuckGo → Wikipedia) ──────────────────────────
   useEffect(() => {
@@ -184,8 +182,6 @@ export function HUDCanvas() {
 
   // ─── Alert level from connector data ─────────────────────────────────────────
   useEffect(() => {
-    if (state.stealthMode) return  // don't override stealth
-
     let highest: AlertLevel = 'NORMAL'
     for (const c of Object.values(state.connectorData)) {
       const al = (c.data as { alertLevel?: string }).alertLevel
@@ -197,7 +193,77 @@ export function HUDCanvas() {
       if (highest === 'CRITICAL') audioEngine.playSound('alert')
       dispatch({ type: 'SET_ALERT_LEVEL', level: highest })
     }
-  }, [state.connectorData, state.stealthMode, state.alertLevel, dispatch])
+  }, [state.connectorData, state.alertLevel, dispatch])
+
+  // ─── Derive rich notifications from Slack/Gmail connector data ────────────────
+  const seenSlackKeys = useRef<Set<string>>(new Set())
+  const seenGmailKeys = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    const slackData = state.connectorData['slack']?.data as unknown as SlackData | undefined
+    const gmailData = state.connectorData['gmail']?.data as unknown as GmailData | undefined
+
+    // Slack mentions → notifications + activity
+    if (slackData?.mentions) {
+      for (const msg of slackData.mentions) {
+        const key = `${msg.channel}-${msg.timestamp}`
+        if (seenSlackKeys.current.has(key)) continue
+        seenSlackKeys.current.add(key)
+        dispatch({
+          type: 'ADD_NOTIFICATION',
+          item: {
+            source: 'slack',
+            text: `@${msg.author} in ${msg.channel}: ${msg.text}`,
+            timestamp: new Date(msg.timestamp).getTime(),
+            priority: 'normal',
+          },
+        })
+        dispatch({
+          type: 'ADD_ACTIVITY',
+          item: { source: 'slack', text: `${msg.author}: ${msg.text}`, timestamp: new Date(msg.timestamp).getTime(), icon: '\u{1F4AC}' },
+        })
+      }
+    }
+
+    // Slack DMs → high priority
+    if (slackData?.recentDMs) {
+      for (const dm of slackData.recentDMs) {
+        const key = `dm-${dm.author}-${dm.timestamp}`
+        if (seenSlackKeys.current.has(key)) continue
+        seenSlackKeys.current.add(key)
+        dispatch({
+          type: 'ADD_NOTIFICATION',
+          item: {
+            source: 'slack',
+            text: `DM from ${dm.author}: ${dm.text}`,
+            timestamp: new Date(dm.timestamp).getTime(),
+            priority: 'high',
+          },
+        })
+      }
+    }
+
+    // Gmail → notifications + activity
+    if (gmailData?.recentThreads) {
+      for (const thread of gmailData.recentThreads) {
+        if (seenGmailKeys.current.has(thread.id)) continue
+        seenGmailKeys.current.add(thread.id)
+        dispatch({
+          type: 'ADD_NOTIFICATION',
+          item: {
+            source: 'gmail',
+            text: `${thread.from}: ${thread.subject}`,
+            timestamp: new Date(thread.timestamp).getTime(),
+            priority: thread.unread ? 'high' : 'normal',
+          },
+        })
+        dispatch({
+          type: 'ADD_ACTIVITY',
+          item: { source: 'gmail', text: `${thread.from} \u2014 ${thread.subject}`, timestamp: new Date(thread.timestamp).getTime(), icon: '\u{1F4E7}' },
+        })
+      }
+    }
+  }, [state.connectorData, dispatch])
 
   // ─── Connector registry ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -332,9 +398,6 @@ export function HUDCanvas() {
         if (!currentWidgets.has(id as WidgetId)) dispatch({ type: 'SHOW_WIDGET', id: id as WidgetId })
       })
 
-      // Sync stealth
-      if (sync.stealthMode !== stealthModeRef.current) dispatch({ type: 'TOGGLE_STEALTH' })
-
       // Sync alert level
       if (sync.alertLevel !== alertLevelRef.current) {
         dispatch({ type: 'SET_ALERT_LEVEL', level: sync.alertLevel as AlertLevel })
@@ -388,7 +451,7 @@ export function HUDCanvas() {
 
     // ③.5 Hand skeleton overlay (neon finger web, on top of video)
     const handLandmarks = gestureRef.current?.getHandLandmarks()
-    if (handLandmarks && !stealthModeRef.current) {
+    if (handLandmarks) {
       // Mirror landmarks to match flipped video
       const mirrored = handLandmarks.map(lm => ({ ...lm, x: 1 - lm.x }))
       drawHandSkeleton(ctx, mirrored, W, H, lastGestureRef.current, t)
@@ -412,9 +475,8 @@ export function HUDCanvas() {
 
     drawHUDChrome(ctx, W, H, t, connStatuses, alertLevel, waveformNorm ?? undefined, 'inactive')
 
-    // ⑥ Widgets (skipped in stealth mode)
-    if (!stealthModeRef.current) {
-      // Sprint + Issues side panels
+    // ⑥ Widgets
+    {
       drawWidgets(ctx, activeWidgetsRef.current, connectorDataRef.current, birthTimes.current, now, notificationsRef.current, activityFeedRef.current, bootTimeRef.current, transcriptPanelRef.current as Parameters<typeof drawWidgets>[8])
 
       // Iron Man Intel Card — face-overlay popup for search results

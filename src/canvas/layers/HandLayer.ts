@@ -169,7 +169,7 @@ export function drawHandSkeleton(
     ctx.shadowColor  = '#00ff41'
     const GESTURE_LABELS: Record<string, string> = {
       open_palm: '✋ SHOW ALL',
-      fist: '✊ STEALTH',
+      fist: '✊ HIDE ALL',
       pinch: '🤏 CLOSE ALL',
       rock_on: '🤘 LISTENING',
       finger_1: '☝ OVERVIEW',

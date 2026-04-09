@@ -96,7 +96,7 @@ export function ConfigDrawer() {
             <tbody>
               <tr><td>🖐 Open Palm</td><td>Show all panels</td></tr>
               <tr><td>✊ Fist (hold 800ms)</td><td>Close all panels</td></tr>
-              <tr><td>👍 Thumbs Up</td><td>Toggle stealth mode</td></tr>
+              <tr><td>👍 Thumbs Up</td><td>(unassigned)</td></tr>
               <tr><td>🤘 Rock On</td><td>Toggle interactive voice mode</td></tr>
               <tr><td>☝️ 1 finger</td><td>Toggle Sprint + Issues</td></tr>
               <tr><td>✌️ 2 fingers</td><td>Toggle GitHub</td></tr>

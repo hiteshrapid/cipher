@@ -30,10 +30,26 @@ export class AudioEngine {
     pickVoice()  // run immediately for browsers that have voices synchronously
   }
 
-  // ─── Lazy AudioContext ────────────────────────────────────────────────────────
+  // ─── Lazy AudioContext (with suspend recovery) ────────────────────────────────
   private getAudioCtx(): AudioContext {
     if (!this.audioCtx) {
       this.audioCtx = new AudioContext()
+    }
+    // Best-effort resume for tone playback (fire-and-forget)
+    if (this.audioCtx.state === 'suspended') {
+      this.audioCtx.resume().catch(() => {})
+    }
+    return this.audioCtx
+  }
+
+  /** Shared context for external consumers (e.g. InteractiveMode TTS).
+   *  Ensures the context is running before returning. */
+  async getSharedContext(): Promise<AudioContext> {
+    if (!this.audioCtx) {
+      this.audioCtx = new AudioContext()
+    }
+    if (this.audioCtx.state === 'suspended') {
+      await this.audioCtx.resume()
     }
     return this.audioCtx
   }

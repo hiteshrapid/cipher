@@ -13,7 +13,6 @@ export const initialHUDState: HUDState = {
   lastGesture:   null,
   configOpen:    false,
   config:        { ...DEFAULT_CONFIG },
-  stealthMode:   false,
   alertLevel:    'NORMAL',
   searchQuery:   null,
   searchResult:  null,
@@ -21,7 +20,7 @@ export const initialHUDState: HUDState = {
   voiceStatus:   'inactive',
   notifications: [],
   activityFeed:  [],
-  transcriptPanel: { active: false, x: 0, y: 0, text: '' },
+  transcriptPanel: { active: false, x: 0, y: 0, text: '', systemText: '' },
 }
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
@@ -42,7 +41,7 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
       }
     }
     case 'HIDE_ALL':
-      return { ...state, activeWidgets: new Set<WidgetId>(), searchQuery: null, searchResult: null, transcriptPanel: { active: false, x: 0, y: 0, text: '' } }
+      return { ...state, activeWidgets: new Set<WidgetId>(), searchQuery: null, searchResult: null, transcriptPanel: { active: false, x: 0, y: 0, text: '', systemText: '' } }
     case 'UPDATE_CONNECTOR':
       return {
         ...state,
@@ -56,12 +55,6 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
       return { ...state, configOpen: !state.configOpen }
     case 'SET_CONFIG':
       return { ...state, config: { ...state.config, ...action.config } }
-    case 'TOGGLE_STEALTH':
-      return {
-        ...state,
-        stealthMode: !state.stealthMode,
-        alertLevel: !state.stealthMode ? 'STEALTH' : 'NORMAL',
-      }
     case 'SET_ALERT_LEVEL':
       return { ...state, alertLevel: action.level }
     case 'SEARCH_QUERY': {
@@ -93,9 +86,9 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
     }
     case 'TOGGLE_TRANSCRIPT':
       if (state.transcriptPanel.active) {
-        return { ...state, transcriptPanel: { active: false, x: 0, y: 0, text: '' } }
+        return { ...state, transcriptPanel: { active: false, x: 0, y: 0, text: '', systemText: '' } }
       }
-      return { ...state, transcriptPanel: { active: true, x: action.x, y: action.y, text: '' } }
+      return { ...state, transcriptPanel: { active: true, x: action.x, y: action.y, text: '', systemText: '' } }
     case 'UPDATE_TRANSCRIPT':
       if (!state.transcriptPanel.active) return state
       return {
@@ -103,6 +96,15 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
         transcriptPanel: {
           ...state.transcriptPanel,
           text: action.text.slice(-120),
+        },
+      }
+    case 'UPDATE_SYSTEM_RESPONSE':
+      if (!state.transcriptPanel.active) return state
+      return {
+        ...state,
+        transcriptPanel: {
+          ...state.transcriptPanel,
+          systemText: action.text.slice(-120),
         },
       }
     default:

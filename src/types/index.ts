@@ -156,7 +156,7 @@ export type WidgetId =
   | 'sprint' | 'issues' | 'clock' | 'status' | 'search'
   | 'github' | 'calendar' | 'notifications' | 'activity' | 'metrics'
 
-export type AlertLevel = 'NORMAL' | 'ALERT' | 'CRITICAL' | 'STEALTH'
+export type AlertLevel = 'NORMAL' | 'ALERT' | 'CRITICAL'
 
 export interface HUDState {
   activeWidgets: Set<WidgetId>
@@ -165,7 +165,6 @@ export interface HUDState {
   lastGesture: { type: GestureType; timestamp: number } | null
   configOpen: boolean
   config: CipherConfig
-  stealthMode: boolean
   alertLevel: AlertLevel
   searchQuery:   string | null
   searchResult:  SearchResult | null
@@ -173,7 +172,7 @@ export interface HUDState {
   voiceStatus: VoiceStatus
   notifications: NotificationItem[]
   activityFeed: ActivityItem[]
-  transcriptPanel: { active: boolean; x: number; y: number; text: string }
+  transcriptPanel: { active: boolean; x: number; y: number; text: string; systemText: string }
 }
 
 export type HUDAction =
@@ -185,7 +184,6 @@ export type HUDAction =
   | { type: 'GESTURE_DETECTED';  gesture: GestureType }
   | { type: 'TOGGLE_CONFIG' }
   | { type: 'SET_CONFIG';        config: Partial<CipherConfig> }
-  | { type: 'TOGGLE_STEALTH' }
   | { type: 'SET_ALERT_LEVEL';   level: AlertLevel }
   | { type: 'SEARCH_QUERY';      query: string }
   | { type: 'SET_SEARCH_RESULT'; result: SearchResult | null; loading?: boolean }
@@ -194,6 +192,7 @@ export type HUDAction =
   | { type: 'ADD_ACTIVITY';      item: ActivityItem }
   | { type: 'TOGGLE_TRANSCRIPT'; x: number; y: number }
   | { type: 'UPDATE_TRANSCRIPT'; text: string }
+  | { type: 'UPDATE_SYSTEM_RESPONSE'; text: string }
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 export interface CipherConfig {

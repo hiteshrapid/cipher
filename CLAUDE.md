@@ -36,9 +36,8 @@ Single global `HUDState` managed by `hudReducer`. Accessed via `useHUD()` hook.
 
 Key state fields:
 - `activeWidgets: Set<WidgetId>` — which panels are visible
-- `alertLevel: 'NORMAL' | 'ALERT' | 'CRITICAL' | 'STEALTH'`
-- `stealthMode: boolean` — hides chrome + dims matrix
-- `transcriptPanel: { active, x, y, text }` — Deepgram live transcript panel
+- `alertLevel: 'NORMAL' | 'ALERT' | 'CRITICAL'`
+- `transcriptPanel: { active, x, y, text, systemText }` — Deepgram live transcript panel
 - `connectorData: Record<string, ConnectorData>` — latest data from each connector
 - `searchResult / searchQuery` — Intel Card (voice search)
 - `notifications[]` (max 20) / `activityFeed[]` (max 30)
@@ -95,7 +94,7 @@ MediaPipe tracks 21 landmarks per hand at ~10fps. Priority order: Rock On → Fi
 |---|---|
 | 🖐 Open Palm (5 fingers) | Show all panels |
 | ✊ Fist (hold 800ms) | Close all panels (also closes transcript panel) |
-| 👍 Thumbs Up | Toggle stealth mode |
+| 👍 Thumbs Up | (unassigned) |
 | 🤘 Rock On (index + pinky up) | Toggle InteractiveMode + transcript panel at palm |
 | ☝️ Finger 1 | Toggle Sprint + Issues together (group) |
 | ✌️ Finger 2 | Toggle GitHub |
@@ -172,7 +171,7 @@ All proxied server-side via `vite.config.ts`. Copy `.env.local.example` → `.en
 
 **Widget groups in GestureEngine.** `FINGER_WIDGETS` is `WidgetId[][]`. Finger 1 maps to `['sprint', 'issues']`. The toggle logic checks if ALL widgets in the group are active before deciding to hide or show.
 
-**Alert level drives visuals.** `MatrixRainLayer` density/speed and `RingLayer` brightness/glow both scale with `alertLevel`. `STEALTH` disables matrix rain entirely.
+**Alert level drives visuals.** `MatrixRainLayer` density/speed and `RingLayer` brightness/glow both scale with `alertLevel`.
 
 ---
 

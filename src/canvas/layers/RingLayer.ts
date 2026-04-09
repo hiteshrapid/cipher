@@ -3,7 +3,7 @@
 
 // ─── Alert Level ─────────────────────────────────────────────────────────────
 /** Operational mode that scales ring brightness, scanline intensity, and colour */
-export type AlertLevel = 'STEALTH' | 'NORMAL' | 'ALERT' | 'CRITICAL'
+export type AlertLevel = 'NORMAL' | 'ALERT' | 'CRITICAL'
 
 export interface RingColors {
   primary: string
@@ -17,15 +17,6 @@ export interface RingColors {
 /** Returns the canonical colour set for a given AlertLevel */
 export function getRingColors(level: AlertLevel): RingColors {
   switch (level) {
-    case 'STEALTH':
-      return {
-        primary: 'rgba(0, 200, 50, 0.30)',
-        mid:     'rgba(0, 200, 50, 0.14)',
-        dim:     'rgba(0, 200, 50, 0.06)',
-        ghost:   'rgba(0, 200, 50, 0.02)',
-        glow:    'rgba(0, 200, 50, 0.0)',  // no bloom in stealth
-        glowDim: 'rgba(0, 200, 50, 0.0)',
-      }
     case 'NORMAL':
       return {
         primary: 'rgba(0, 255, 65, 0.85)',
@@ -392,11 +383,9 @@ function drawAlertBadge(ctx: CanvasRenderingContext2D, level: AlertLevel) {
   const bh     = 20
 
   // Background pill
-  ctx.fillStyle = level === 'STEALTH'
-    ? 'rgba(0, 180, 50, 0.10)'
-    : level === 'ALERT'
-      ? 'rgba(255, 140, 0, 0.15)'
-      : 'rgba(255, 40, 40, 0.18)'
+  ctx.fillStyle = level === 'ALERT'
+    ? 'rgba(255, 140, 0, 0.15)'
+    : 'rgba(255, 40, 40, 0.18)'
 
   ctx.beginPath()
   ctx.roundRect(x - pad.x, y - pad.y, bw, bh, 3)
@@ -445,9 +434,6 @@ export function drawHUDChrome(
   const innerR = baseR * 0.72
   const waveR  = baseR * 0.88   // waveform sits between middle and outer
 
-  // In STEALTH mode suppress scanline and corner glow — rings still drawn at low opacity
-  const isStealth = alertLevel === 'STEALTH'
-
   drawOuterRing(ctx, cx, cy, outerR, t)
   drawMiddleRing(ctx, cx, cy, baseR,  t)
 
@@ -457,10 +443,7 @@ export function drawHUDChrome(
 
   drawInnerArcs(ctx, cx, cy, innerR, t)
   drawCornerBrackets(ctx, w, h)
-
-  if (!isStealth) {
-    drawScanline(ctx, w, h, t)
-  }
+  drawScanline(ctx, w, h, t)
 
   drawStatusBar(ctx, w, h, connectorStatuses)
   drawClock(ctx, w)

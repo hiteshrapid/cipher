@@ -8,7 +8,6 @@ import { ConfigDrawer } from './components/ConfigDrawer'
 
 const ALERT_COLORS: Record<string, string> = {
   NORMAL:   'rgba(0, 255, 65, 0.8)',
-  STEALTH:  'rgba(0, 200, 50, 0.4)',
   ALERT:    'rgba(255, 160, 0, 0.9)',
   CRITICAL: 'rgba(255, 50, 50, 0.95)',
 }
@@ -60,7 +59,7 @@ export default function App() {
     <HUDContext.Provider value={{ state, dispatch }}>
       <HUDCanvas />
 
-      {/* ── Top-left: settings + stealth (hidden in OBS overlay mode) ── */}
+      {/* ── Top-left: settings (hidden in OBS overlay mode) ── */}
       {!isOverlay && <div style={{ position: 'fixed', top: 20, left: 20, display: 'flex', gap: 8, zIndex: 50 }}>
         <button
           onClick={() => dispatch({ type: 'TOGGLE_CONFIG' })}
@@ -69,20 +68,8 @@ export default function App() {
           ⚙ CIPHER
         </button>
 
-        <button
-          title="Toggle stealth mode (hides HUD chrome)"
-          onClick={() => dispatch({ type: 'TOGGLE_STEALTH' })}
-          style={{
-            ...HUD_BTN,
-            color:       state.stealthMode ? 'rgba(0, 200, 50, 0.5)' : 'rgba(0, 255, 65, 0.6)',
-            borderColor: state.stealthMode ? 'rgba(0, 200, 50, 0.3)' : 'rgba(0, 255, 65, 0.25)',
-          }}
-        >
-          {state.stealthMode ? '◎ STEALTH' : '◈ VISIBLE'}
-        </button>
-
         {/* Alert level indicator — only shows when not NORMAL */}
-        {state.alertLevel !== 'NORMAL' && !state.stealthMode && (
+        {state.alertLevel !== 'NORMAL' && (
           <div style={{
             ...HUD_BTN,
             cursor: 'default',

@@ -3,10 +3,11 @@
 // Activated by rock-on gesture; stays listening until toggled off.
 
 import type { HUDAction, ParsedCommand, WidgetId } from '../types'
+import { audioEngine } from './AudioEngine'
 
 type Dispatch = (action: HUDAction) => void
 
-// ─── Cartesia TTS ───────────────────────────────────────────────────────────
+// ─── Cartesia TTS (reuses shared AudioContext) ──────────────────────────────
 
 async function speak(text: string): Promise<void> {
   const apiKey = import.meta.env.VITE_CARTESIA_API_KEY
@@ -33,7 +34,8 @@ async function speak(text: string): Promise<void> {
     if (!res.ok) throw new Error(`Cartesia error: ${res.status}`)
 
     const arrayBuffer = await res.arrayBuffer()
-    const audioCtx = new AudioContext({ sampleRate: 24000 })
+    // Reuse shared AudioContext — avoids suspended-context hang
+    const audioCtx = await audioEngine.getSharedContext()
     const float32 = new Float32Array(arrayBuffer)
     const audioBuffer = audioCtx.createBuffer(1, float32.length, 24000)
     audioBuffer.getChannelData(0).set(float32)
@@ -43,8 +45,12 @@ async function speak(text: string): Promise<void> {
     source.connect(audioCtx.destination)
     source.start()
 
-    await new Promise<void>(resolve => { source.onended = () => resolve() })
-    audioCtx.close()
+    // Timeout prevents hanging forever if onended never fires
+    await Promise.race([
+      new Promise<void>(resolve => { source.onended = () => resolve() }),
+      new Promise<void>(resolve => setTimeout(resolve, 15000)),
+    ])
+    // Do NOT close shared context
   } catch (err) {
     console.warn('CIPHER: Cartesia TTS failed, falling back to browser:', err)
     const u = new SpeechSynthesisUtterance(text)
@@ -235,10 +241,15 @@ export class InteractiveMode {
     const cmd = parseCommand(text)
     if (cmd) {
       const response = executeCommand(cmd, this.dispatch)
-      if (response) await speak(response)
+      if (response) {
+        // Show system response in transcript panel, then speak it
+        this.dispatch({ type: 'UPDATE_SYSTEM_RESPONSE', text: response })
+        await speak(response)
+      }
       // Stay listening — do NOT deactivate after command
     } else {
       this.dispatch({ type: 'COMMAND_RECEIVED', text: `◈ "${text}" — not a command` })
+      this.dispatch({ type: 'UPDATE_SYSTEM_RESPONSE', text: 'Listening...' })
     }
   }
 

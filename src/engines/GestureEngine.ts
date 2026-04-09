@@ -35,19 +35,19 @@ function isThumbExtended(lm: Landmark[]): boolean {
 function countExtendedFingers(lm: Landmark[]): number {
   let count = 0
   if (isThumbExtended(lm)) count++
-  if (lm[8].y < lm[6].y - 0.02) count++
-  if (lm[12].y < lm[10].y - 0.02) count++
-  if (lm[16].y < lm[14].y - 0.02) count++
-  if (lm[20].y < lm[18].y - 0.02) count++
+  if (lm[8].y < lm[6].y - 0.03) count++
+  if (lm[12].y < lm[10].y - 0.03) count++
+  if (lm[16].y < lm[14].y - 0.03) count++
+  if (lm[20].y < lm[18].y - 0.03) count++
   return count
 }
 
 function countNonThumbExtended(lm: Landmark[]): number {
   let count = 0
-  if (lm[8].y < lm[6].y - 0.02) count++
-  if (lm[12].y < lm[10].y - 0.02) count++
-  if (lm[16].y < lm[14].y - 0.02) count++
-  if (lm[20].y < lm[18].y - 0.02) count++
+  if (lm[8].y < lm[6].y - 0.03) count++
+  if (lm[12].y < lm[10].y - 0.03) count++
+  if (lm[16].y < lm[14].y - 0.03) count++
+  if (lm[20].y < lm[18].y - 0.03) count++
   return count
 }
 
@@ -128,9 +128,8 @@ function handleGesture(
       dispatch({ type: 'HIDE_ALL' })
       break
 
-    // Thumbs up — toggle stealth mode
+    // Thumbs up — currently unassigned
     case 'thumbs_up':
-      dispatch({ type: 'TOGGLE_STEALTH' })
       break
 
     // Rock on — toggle interactive mode (transcript panel at palm)
@@ -267,24 +266,22 @@ export class GestureEngine {
         fistHoldStart = null
       }
       if (detected === null) {
-        this.lastGesture = null
+        // Fist accumulating — don't clear lastGesture (prevents spurious fires on jitter)
         return
       }
     } else {
       fistHoldStart = null
 
-      if (isThumbsUp(lm)) {
+      // Check open palm FIRST — 4 non-thumb + thumb roughly extended = open palm
+      const nonThumb = countNonThumbExtended(lm)
+      if (nonThumb === 4 && isThumbExtended(lm)) {
+        detected = 'open_palm'
+      } else if (countExtendedFingers(lm) === 5) {
+        detected = 'open_palm'
+      } else if (isThumbsUp(lm)) {
         detected = 'thumbs_up'
-      } else {
-        const count = countExtendedFingers(lm)
-        if (count === 5) {
-          detected = 'open_palm'
-        } else if (count >= 1 && count <= 4) {
-          const nonThumb = countNonThumbExtended(lm)
-          if (nonThumb >= 1 && nonThumb <= 4) {
-            detected = `finger_${nonThumb}` as ExtendedGestureType
-          }
-        }
+      } else if (nonThumb >= 1 && nonThumb <= 4) {
+        detected = `finger_${nonThumb}` as ExtendedGestureType
       }
     }
 

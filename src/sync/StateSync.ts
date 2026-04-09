@@ -7,7 +7,6 @@ import type { WidgetId, AlertLevel } from '../types'
 
 export interface SyncState {
   activeWidgets: string[]
-  stealthMode: boolean
   alertLevel: string
   lastCommand: string | null
   lastGesture: string | null
@@ -23,7 +22,6 @@ let lastPushedState = ''
 // ─── Controller (Chrome tab) — pushes state ─────────────────────────────────
 export function pushState(state: {
   activeWidgets: Set<WidgetId>
-  stealthMode: boolean
   alertLevel: AlertLevel
   lastCommand: { text: string; timestamp: number } | null
   lastGesture: { type: string; timestamp: number } | null
@@ -31,7 +29,6 @@ export function pushState(state: {
 }) {
   const sync: SyncState = {
     activeWidgets: Array.from(state.activeWidgets),
-    stealthMode: state.stealthMode,
     alertLevel: state.alertLevel,
     lastCommand: state.lastCommand?.text ?? null,
     lastGesture: state.lastGesture?.type ?? null,
