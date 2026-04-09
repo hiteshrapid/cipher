@@ -1157,8 +1157,8 @@ function drawDrillDownContent(
     curY += 14
   }
 
-  // Body (word-wrapped)
-  if (drillDown.body) {
+  // Body (word-wrapped) — skip if body is already contained in title
+  if (drillDown.body && !drillDown.title.includes(drillDown.body)) {
     curY += 4
     ctx.font = `9px ${colorScheme.font}`
     ctx.fillStyle = colorScheme.mid
