@@ -117,6 +117,7 @@ export interface GmailData {
 export interface NotificationItem {
   source: 'slack' | 'gmail' | 'github'
   text: string
+  detail?: string   // full content for detail view
   timestamp: number
   priority: 'low' | 'normal' | 'high'
 }
@@ -124,8 +125,19 @@ export interface NotificationItem {
 export interface ActivityItem {
   source: string
   text: string
+  detail?: string   // full content for detail view (e.g. Gmail snippet)
   timestamp: number
   icon: string
+}
+
+export interface DrillDownState {
+  type: 'notification' | 'activity' | 'linear_status' | 'linear_ticket'
+  itemIndex?: number
+  statusFilter?: string
+  title: string
+  body: string
+  source: string
+  timestamp: number
 }
 
 // ─── Search ──────────────────────────────────────────────────────────────────
@@ -173,6 +185,8 @@ export interface HUDState {
   notifications: NotificationItem[]
   activityFeed: ActivityItem[]
   transcriptPanel: { active: boolean; x: number; y: number; text: string; systemText: string }
+  focusedWidget: WidgetId | null
+  drillDown: DrillDownState | null
 }
 
 export type HUDAction =
@@ -193,6 +207,10 @@ export type HUDAction =
   | { type: 'TOGGLE_TRANSCRIPT'; x: number; y: number }
   | { type: 'UPDATE_TRANSCRIPT'; text: string }
   | { type: 'UPDATE_SYSTEM_RESPONSE'; text: string }
+  | { type: 'FOCUS_WIDGET'; id: WidgetId }
+  | { type: 'UNFOCUS_WIDGET' }
+  | { type: 'DRILL_DOWN'; state: DrillDownState }
+  | { type: 'DRILL_BACK' }
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 export interface CipherConfig {

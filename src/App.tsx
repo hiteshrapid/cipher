@@ -41,12 +41,10 @@ type WidgetBtn = { id: 'sprint' | 'issues' | 'github' | 'calendar' | 'notificati
 
 const WIDGET_BUTTONS: WidgetBtn[] = [
   { id: 'sprint',        label: 'OVERVIEW',  theme: 'green' },
-  { id: 'issues',        label: 'TICKETS',   theme: 'green' },
   { id: 'github',        label: 'GITHUB',    theme: 'cyan' },
   { id: 'calendar',      label: 'CALENDAR',  theme: 'cyan' },
   { id: 'notifications', label: 'NOTIFS',    theme: 'amber' },
-  { id: 'activity',      label: 'ACTIVITY',  theme: 'green' },
-  { id: 'metrics',       label: 'METRICS',   theme: 'green' },
+  { id: 'activity',      label: 'GMAIL',     theme: 'green' },
 ]
 
 export default function App() {

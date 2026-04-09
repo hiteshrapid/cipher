@@ -7,9 +7,11 @@ import type {
   SearchResult,
   NotificationItem,
   ActivityItem,
+  DrillDownState,
   GitHubData,
   CalendarData,
   LinearData,
+  LinearTicket,
 } from '../../types'
 
 const C = {
@@ -474,7 +476,7 @@ function drawCalendarWidget(
 }
 
 // ─── Linear Assigned Tickets widget ─────────────────────────────────────────
-function drawLinearAssignedWidget(
+export function drawLinearAssignedWidget(
   ctx: CanvasRenderingContext2D,
   x: number, y: number,
   data: LinearData | null,
@@ -631,11 +633,12 @@ function drawActivityFeedWidget(
   activityFeed: ActivityItem[],
   age: number,
 ) {
-  const W = 400
+  const W = 290
   const items = activityFeed.slice(0, 6)
-  const H = 90
+  const contentH = items.length > 0 ? items.length * 20 : 24
+  const H = 32 + contentH + 12
 
-  drawPanel(ctx, x, y, W, H, 'ACTIVITY FEED', age)
+  drawPanel(ctx, x, y, W, H, 'GMAIL FEED', age)
 
   ctx.save()
   applyEntrance(ctx, age)
@@ -645,39 +648,40 @@ function drawActivityFeedWidget(
     ctx.font      = `10px ${C.font}`
     ctx.fillStyle = C.dim
     ctx.textAlign = 'left'
-    ctx.fillText('No recent activity', x + 12, y + 54)
+    ctx.fillText('No recent emails', x + 12, y + 54)
     ctx.restore()
     return
   }
 
   const now = Date.now()
-  const curY = y + 38
+  let curY = y + 38
 
   items.forEach((item, i) => {
-    // Fading opacity for older items
     const fadeAlpha = Math.max(0.3, 1 - i * 0.12)
     ctx.globalAlpha = Math.min(1, age / 300) * fadeAlpha
 
+    // Relative time (left)
     const timeStr = relativeTime(item.timestamp, now)
-
     ctx.font      = `8px ${C.font}`
     ctx.fillStyle = C.dim
     ctx.textAlign = 'left'
-    ctx.fillText(timeStr.padEnd(4, ' '), x + 12 + (i % 3) * 130, curY + Math.floor(i / 3) * 22)
+    ctx.fillText(timeStr.padEnd(4, ' '), x + 12, curY)
 
-    // Highlight recent items (< 30s old)
+    // Email text — vertical list, one per row
     const itemAge = now - item.timestamp
     ctx.font      = `9px ${C.font}`
     ctx.fillStyle = itemAge < 30000 ? C.primary : C.mid
-    const text = item.text.length > 16 ? item.text.slice(0, 16) + '…' : item.text
-    ctx.fillText(text, x + 38 + (i % 3) * 130, curY + Math.floor(i / 3) * 22)
+    const text = item.text.length > 32 ? item.text.slice(0, 32) + '\u2026' : item.text
+    ctx.fillText(text, x + 46, curY)
+
+    curY += 20
   })
 
   ctx.restore()
 }
 
 // ─── Mini Metrics (raw text, no panel) ──────────────────────────────────────
-function drawMiniMetrics(
+export function drawMiniMetrics(
   ctx: CanvasRenderingContext2D,
   x: number, y: number,
   bootTime: number,
@@ -979,14 +983,23 @@ export function drawGestureFeedback(
   ctx.shadowBlur   = 0
 }
 
+// ─── Widget bounding boxes (exported for hit-testing in GestureEngine) ───────
+export const WIDGET_BOUNDS: Record<string, { x: number; y: number; w: number; h: number }> = {
+  sprint:        { x: 24,  y: 80,  w: 290, h: 160 },
+  github:        { x: 966, y: 80,  w: 290, h: 200 },
+  calendar:      { x: 966, y: 240, w: 290, h: 160 },
+  notifications: { x: 966, y: 400, w: 290, h: 140 },
+  activity:      { x: 24,  y: 260, w: 290, h: 140 },
+}
+
 // ─── Widget positions (anchored to left side by default) ─────────────────────
 const WIDGET_POSITIONS: Record<WidgetId, { x: number; y: number }> = {
   sprint:        { x: 24,  y: 80  },
-  issues:        { x: 24,  y: 240 },
+  issues:        { x: 24,  y: 240 },  // kept for WidgetId compat, not rendered
   github:        { x: 966, y: 80  },
   calendar:      { x: 966, y: 240 },
   notifications: { x: 966, y: 400 },
-  activity:      { x: 24,  y: 580 },
+  activity:      { x: 24,  y: 260 },  // below sprint with 20px gap
   metrics:       { x: 966, y: 600 },
   clock:         { x: 0,   y: 0   },  // drawn by RingLayer
   status:        { x: 0,   y: 0   },  // drawn by RingLayer
@@ -1102,6 +1115,184 @@ function drawTranscriptPanel(
   ctx.restore()
 }
 
+// ─── Word wrap for canvas text ──────────────────────────────────────────────
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const words = text.split(' ')
+  const lines: string[] = []
+  let current = ''
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word
+    if (ctx.measureText(test).width > maxWidth) {
+      if (current) lines.push(current)
+      current = word
+    } else {
+      current = test
+    }
+  }
+  if (current) lines.push(current)
+  return lines
+}
+
+// ─── In-panel drill-down: replaces panel content with full item detail ──────
+function drawDrillDownContent(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, W: number,
+  drillDown: DrillDownState,
+  colorScheme: typeof C,
+) {
+  const padding = 10
+  const textMaxW = W - padding * 2
+
+  // Reset text alignment (may be 'right' from previous draw calls)
+  ctx.textAlign    = 'left'
+  ctx.textBaseline = 'top'
+
+  // Title (word-wrapped, same 9px font as normal panel text)
+  ctx.font = `9px ${colorScheme.font}`
+  ctx.fillStyle = colorScheme.primary
+  const titleLines = wrapText(ctx, drillDown.title, textMaxW)
+  let curY = y + 38
+  for (const line of titleLines) {
+    ctx.fillText(line, x + padding, curY)
+    curY += 14
+  }
+
+  // Body (word-wrapped)
+  if (drillDown.body) {
+    curY += 4
+    ctx.font = `9px ${colorScheme.font}`
+    ctx.fillStyle = colorScheme.mid
+    const bodyLines = wrapText(ctx, drillDown.body, textMaxW)
+    for (const line of bodyLines.slice(0, 12)) { // max 12 lines
+      ctx.fillText(line, x + padding, curY)
+      curY += 14
+    }
+  }
+
+  // Timestamp
+  curY += 8
+  const timeStr = relativeTime(drillDown.timestamp, Date.now())
+  ctx.font = `8px ${colorScheme.font}`
+  ctx.fillStyle = colorScheme.dim
+  ctx.fillText(timeStr, x + padding, curY)
+}
+
+// ─── Back button rendered at bottom of focused panel ────────────────────────
+// Returns the Y zone (in canvas-space at 2× scale) for hit-testing
+function drawBackButton(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, W: number, H: number,
+  colorScheme: typeof C,
+) {
+  const btnY = y + H - 22
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+  ctx.font = `9px ${colorScheme.font}`
+  ctx.fillStyle = colorScheme.primary
+  ctx.strokeStyle = colorScheme.primary
+  ctx.lineWidth = 0.5
+
+  // Separator line
+  ctx.beginPath()
+  ctx.moveTo(x + 8, btnY - 4)
+  ctx.lineTo(x + W - 8, btnY - 4)
+  ctx.stroke()
+
+  // Back label
+  ctx.fillText('\u25C2 BACK', x + 10, btnY + 8)
+}
+
+// ─── Draw filtered Linear tickets (reused for sprint drill-down) ────────────
+function drawFilteredTickets(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, _W: number,
+  tickets: LinearTicket[],
+  statusFilter: string,
+) {
+  const filtered = tickets.filter(t => t.state.toLowerCase().includes(statusFilter.toLowerCase()))
+  const label = statusFilter.toUpperCase()
+
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'top'
+  ctx.font = `bold 9px ${C.font}`
+  ctx.fillStyle = C.primary
+  ctx.fillText(`\u25B8 ${label} (${filtered.length})`, x + 10, y + 38)
+
+  let curY = y + 56
+  for (const ticket of filtered.slice(0, 8)) {
+    // Priority dot
+    ctx.fillStyle = ticket.priority <= 1 ? 'rgba(255, 80, 80, 0.9)' : ticket.priority <= 2 ? 'rgba(255, 160, 0, 0.9)' : C.dim
+    ctx.beginPath()
+    ctx.arc(x + 16, curY - 2, 3, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Identifier
+    ctx.font = `9px ${C.font}`
+    ctx.fillStyle = C.mid
+    ctx.fillText(ticket.identifier, x + 24, curY)
+
+    // Title (full, word-wrapped if needed)
+    ctx.fillStyle = 'rgba(0, 255, 65, 0.65)'
+    const title = ticket.title.length > 28 ? ticket.title.slice(0, 28) + '\u2026' : ticket.title
+    ctx.fillText(title, x + 76, curY)
+
+    curY += 18
+  }
+}
+
+// ─── Get hovered item index in focused panel ───────────────────────────────
+export function getHoveredItemIndex(
+  focusedWidget: WidgetId,
+  fingerTip: { x: number; y: number },
+): number {
+  const bounds = WIDGET_BOUNDS[focusedWidget]
+  if (!bounds) return -1
+  const centre = getFocusCentre(focusedWidget)
+  const panelTopY = centre.y * 2 + 38 * 2
+  const rowHeight = focusedWidget === 'activity' ? 22 * 2 : 20 * 2
+  const maxItems = focusedWidget === 'notifications' ? 5 : focusedWidget === 'activity' ? 6 : 5
+  const panelLeftX = centre.x * 2
+  const panelRightX = panelLeftX + bounds.w * 2
+
+  if (fingerTip.x < panelLeftX || fingerTip.x > panelRightX) return -1
+  const rowIdx = Math.floor((fingerTip.y - panelTopY) / rowHeight)
+  return (rowIdx >= 0 && rowIdx < maxItems) ? rowIdx : -1
+}
+
+// ─── Dwell-to-select state (module-level, persists across frames) ───────────
+const DWELL_MS = 1500  // 1.5 seconds to select
+let dwellRowIdx = -1
+let dwellStartTime = 0
+let dwellFired = false  // prevent re-firing until row changes
+
+/** Returns the row index that just completed dwell selection, or -1 */
+export function consumeDwellSelection(): number {
+  if (dwellFired) {
+    dwellFired = false
+    return dwellRowIdx
+  }
+  return -1
+}
+
+/** Reset dwell state (call when exiting focus mode) */
+export function resetDwell() {
+  dwellRowIdx = -1
+  dwellStartTime = 0
+  dwellFired = false
+}
+
+// ─── Focus mode: centred position for a widget at 2× scale ─────────────────
+function getFocusCentre(widgetId: WidgetId): { x: number; y: number } {
+  const bounds = WIDGET_BOUNDS[widgetId]
+  if (!bounds) return { x: 320, y: 180 }
+  // At 2× scale the panel occupies bounds.w*2 × bounds.h*2
+  // We position so the panel (drawn at native size inside a scale(2) transform) is centred
+  const cx = (1280 - bounds.w * 2) / 2
+  const cy = (720 - bounds.h * 2) / 2
+  // Divide by 2 because ctx.scale(2,2) doubles the coordinates
+  return { x: cx / 2, y: cy / 2 }
+}
+
 // ─── Main draw call (search handled separately as Intel Card in HUDCanvas) ────
 export function drawWidgets(
   ctx: CanvasRenderingContext2D,
@@ -1111,85 +1302,260 @@ export function drawWidgets(
   now: number,
   notifications: NotificationItem[],
   activityFeed: ActivityItem[],
-  bootTime: number,
+  _bootTime: number,
   transcriptPanel?: { active: boolean; x: number; y: number; text: string; systemText?: string; bornAt?: number },
+  focusedWidget?: WidgetId | null,
+  fingerTip?: { x: number; y: number } | null,
+  drillDown?: DrillDownState | null,
 ) {
   const githubData = connectorData['github']?.data as unknown as GitHubData | undefined
   const calData    = connectorData['calendar']?.data as unknown as CalendarData | undefined
   const linearData = connectorData['linear']?.data as unknown as LinearData | undefined
 
-  if (activeWidgets.has('sprint')) {
-    const born = widgetBirthTimes.get('sprint') ?? now
-    drawLinearOverviewWidget(
-      ctx,
-      WIDGET_POSITIONS.sprint.x, WIDGET_POSITIONS.sprint.y,
-      linearData ?? null,
-      now - born,
-    )
+  // Helper: get position + scale for a widget based on focus state
+  const getDrawParams = (widgetId: WidgetId): { x: number; y: number; preScale: () => void; postScale: () => void } => {
+    const pos = WIDGET_POSITIONS[widgetId]
+    if (focusedWidget === widgetId) {
+      const centre = getFocusCentre(widgetId)
+      return {
+        x: centre.x, y: centre.y,
+        preScale:  () => { ctx.save(); ctx.scale(2, 2) },
+        postScale: () => { ctx.restore() },
+      }
+    } else if (focusedWidget) {
+      return {
+        x: pos.x, y: pos.y,
+        preScale:  () => { ctx.save(); ctx.globalAlpha = 0.3 },
+        postScale: () => { ctx.restore() },
+      }
+    }
+    return { x: pos.x, y: pos.y, preScale: () => {}, postScale: () => {} }
   }
 
-  if (activeWidgets.has('issues')) {
-    const born = widgetBirthTimes.get('issues') ?? now
-    drawLinearAssignedWidget(
-      ctx,
-      WIDGET_POSITIONS.issues.x, WIDGET_POSITIONS.issues.y,
-      linearData ?? null,
-      now - born,
-    )
+  if (activeWidgets.has('sprint')) {
+    const born = widgetBirthTimes.get('sprint') ?? now
+    const p = getDrawParams('sprint')
+    p.preScale()
+    if (focusedWidget === 'sprint' && drillDown?.type === 'linear_status' && linearData) {
+      // Drill-down: show filtered tickets for the selected status
+      const H = 220
+      const dx = (1280 - 290 * 2) / 2 / 2
+      const dy = (720 - H * 2) / 2 / 2
+      drawPanel(ctx, dx, dy, 290, H, `SPRINT \u2014 ${drillDown.statusFilter?.toUpperCase() ?? ''}`, now - born)
+      ctx.save()
+      clipToPanel(ctx, dx, dy, 290, H)
+      drawFilteredTickets(ctx, dx, dy, 290, linearData.assignedTickets, drillDown.statusFilter ?? '')
+      drawBackButton(ctx, dx, dy, 290, H, C)
+      ctx.restore()
+    } else {
+      drawLinearOverviewWidget(ctx, p.x, p.y, linearData ?? null, now - born)
+    }
+    p.postScale()
   }
 
   if (activeWidgets.has('github')) {
     const born = widgetBirthTimes.get('github') ?? now
-    drawGitHubWidget(
-      ctx,
-      WIDGET_POSITIONS.github.x, WIDGET_POSITIONS.github.y,
-      githubData ?? null,
-      now - born,
-    )
+    const p = getDrawParams('github')
+    p.preScale()
+    drawGitHubWidget(ctx, p.x, p.y, githubData ?? null, now - born)
+    p.postScale()
   }
 
   if (activeWidgets.has('calendar')) {
     const born = widgetBirthTimes.get('calendar') ?? now
-    drawCalendarWidget(
-      ctx,
-      WIDGET_POSITIONS.calendar.x, WIDGET_POSITIONS.calendar.y,
-      calData ?? null,
-      now - born,
-    )
+    const p = getDrawParams('calendar')
+    p.preScale()
+    drawCalendarWidget(ctx, p.x, p.y, calData ?? null, now - born)
+    p.postScale()
   }
 
   if (activeWidgets.has('notifications')) {
     const born = widgetBirthTimes.get('notifications') ?? now
-    drawNotificationsWidget(
-      ctx,
-      WIDGET_POSITIONS.notifications.x, WIDGET_POSITIONS.notifications.y,
-      notifications,
-      now - born,
-    )
+    const p = getDrawParams('notifications')
+    p.preScale()
+    if (focusedWidget === 'notifications' && drillDown?.type === 'notification') {
+      // Drill-down: show full Slack message in-panel (AMBER theme)
+      // Use fixed drill-down height and centre for it
+      const H = 220
+      const dx = (1280 - 290 * 2) / 2 / 2  // centred X for 290px panel at 2×
+      const dy = (720 - H * 2) / 2 / 2      // centred Y for drill-down height at 2×
+      drawPanel(ctx, dx, dy, 290, H, 'SLACK MESSAGE', now - born, AMBER)
+      ctx.save()
+      clipToPanel(ctx, dx, dy, 290, H)
+      drawDrillDownContent(ctx, dx, dy, 290, drillDown, AMBER)
+      drawBackButton(ctx, dx, dy, 290, H, AMBER)
+      ctx.restore()
+    } else {
+      drawNotificationsWidget(ctx, p.x, p.y, notifications, now - born)
+    }
+    p.postScale()
   }
 
   if (activeWidgets.has('activity')) {
     const born = widgetBirthTimes.get('activity') ?? now
-    drawActivityFeedWidget(
-      ctx,
-      WIDGET_POSITIONS.activity.x, WIDGET_POSITIONS.activity.y,
-      activityFeed,
-      now - born,
-    )
-  }
-
-  if (activeWidgets.has('metrics')) {
-    const born = widgetBirthTimes.get('metrics') ?? now
-    drawMiniMetrics(
-      ctx,
-      WIDGET_POSITIONS.metrics.x, WIDGET_POSITIONS.metrics.y,
-      bootTime,
-      now - born,
-    )
+    const p = getDrawParams('activity')
+    p.preScale()
+    if (focusedWidget === 'activity' && drillDown?.type === 'activity') {
+      // Drill-down: show full Gmail email in-panel (GREEN theme)
+      const H = 220
+      const dx = (1280 - 290 * 2) / 2 / 2
+      const dy = (720 - H * 2) / 2 / 2
+      drawPanel(ctx, dx, dy, 290, H, 'EMAIL', now - born)
+      ctx.save()
+      clipToPanel(ctx, dx, dy, 290, H)
+      drawDrillDownContent(ctx, dx, dy, 290, drillDown, C)
+      drawBackButton(ctx, dx, dy, 290, H, C)
+      ctx.restore()
+    } else {
+      drawActivityFeedWidget(ctx, p.x, p.y, activityFeed, now - born)
+    }
+    p.postScale()
   }
 
   if (transcriptPanel?.active) {
     const age = transcriptPanel.bornAt != null ? now - transcriptPanel.bornAt : 300
     drawTranscriptPanel(ctx, transcriptPanel.x, transcriptPanel.y, transcriptPanel.text, transcriptPanel.systemText ?? '', age)
+  }
+
+  // ── Hover highlight + dwell-to-select on focused panel rows ──
+  if (focusedWidget && fingerTip && !drillDown) {
+    const bounds = WIDGET_BOUNDS[focusedWidget]
+    if (bounds) {
+      const centre = getFocusCentre(focusedWidget)
+      const panelTopY = centre.y * 2 + 38 * 2
+      const rowHeight = 20 * 2 // uniform 20px rows at 2× scale
+      const maxItems = focusedWidget === 'notifications' ? 5
+        : focusedWidget === 'activity' ? 6
+        : focusedWidget === 'sprint' ? 4  // 4 status rows
+        : 5
+      const panelLeftX = centre.x * 2
+      const panelRightX = panelLeftX + bounds.w * 2
+
+      if (fingerTip.x >= panelLeftX && fingerTip.x <= panelRightX) {
+        const rowIdx = Math.floor((fingerTip.y - panelTopY) / rowHeight)
+        if (rowIdx >= 0 && rowIdx < maxItems) {
+          // Dwell tracking
+          if (rowIdx !== dwellRowIdx) {
+            dwellRowIdx = rowIdx
+            dwellStartTime = now
+            dwellFired = false
+          }
+          const dwellElapsed = now - dwellStartTime
+          const dwellProgress = Math.min(1, dwellElapsed / DWELL_MS)
+
+          // Fire selection when dwell completes
+          if (dwellProgress >= 1 && !dwellFired) {
+            dwellFired = true
+          }
+
+          const highlightY = panelTopY + rowIdx * rowHeight
+          const rowW = bounds.w * 2 - 8
+
+          ctx.save()
+
+          // Row highlight background
+          ctx.fillStyle = `rgba(0, 255, 65, ${0.05 + dwellProgress * 0.1})`
+          ctx.strokeStyle = C.primary
+          ctx.lineWidth = 1
+          ctx.shadowColor = C.primary
+          ctx.shadowBlur = 4 + dwellProgress * 8
+          ctx.beginPath()
+          ctx.roundRect(panelLeftX + 4, highlightY, rowW, rowHeight, 3)
+          ctx.fill()
+          ctx.stroke()
+          ctx.shadowBlur = 0
+
+          // Progress bar (fills left → right along bottom of row)
+          if (dwellProgress > 0 && dwellProgress < 1) {
+            const barH = 3
+            const barY = highlightY + rowHeight - barH - 2
+            // Track background
+            ctx.fillStyle = 'rgba(0, 255, 65, 0.1)'
+            ctx.fillRect(panelLeftX + 8, barY, rowW - 8, barH)
+            // Fill
+            ctx.fillStyle = C.primary
+            ctx.shadowColor = C.glow
+            ctx.shadowBlur = 6
+            ctx.fillRect(panelLeftX + 8, barY, (rowW - 8) * dwellProgress, barH)
+            ctx.shadowBlur = 0
+          }
+
+          // Completion flash
+          if (dwellFired) {
+            ctx.fillStyle = 'rgba(0, 255, 65, 0.2)'
+            ctx.fillRect(panelLeftX + 4, highlightY, rowW, rowHeight)
+          }
+
+          // Fingertip indicator dot
+          ctx.fillStyle = C.primary
+          ctx.beginPath()
+          ctx.arc(fingerTip.x, fingerTip.y, 5, 0, Math.PI * 2)
+          ctx.fill()
+
+          ctx.restore()
+        } else {
+          // Finger outside rows — reset dwell
+          dwellRowIdx = -1
+          dwellStartTime = 0
+        }
+      } else {
+        // Finger outside panel — reset dwell
+        dwellRowIdx = -1
+        dwellStartTime = 0
+      }
+    }
+  } else if (!focusedWidget) {
+    // Not in focus mode — reset dwell
+    dwellRowIdx = -1
+    dwellStartTime = 0
+    dwellFired = false
+  }
+
+  // ── Dwell-to-select for back button (when drilled down) ──
+  if (focusedWidget && fingerTip && drillDown) {
+    const bounds = WIDGET_BOUNDS[focusedWidget]
+    if (bounds) {
+      // Use the same drill-down dimensions as the rendering code
+      const drillH = 220
+      const drillW = 290
+      const dx = (1280 - drillW * 2) / 2  // screen-space X of panel left edge
+      const dy = (720 - drillH * 2) / 2   // screen-space Y of panel top edge
+      const backBtnY = dy + (drillH - 22) * 2  // back button Y in screen space
+      const panelLeftX = dx
+      const panelRightX = dx + drillW * 2
+
+      if (fingerTip.x >= panelLeftX && fingerTip.x <= panelRightX &&
+          fingerTip.y >= backBtnY && fingerTip.y <= backBtnY + 40) {
+        // Hovering back button
+        if (dwellRowIdx !== -99) { // -99 = back button sentinel
+          dwellRowIdx = -99
+          dwellStartTime = now
+          dwellFired = false
+        }
+        const dwellElapsed = now - dwellStartTime
+        const dwellProgress = Math.min(1, dwellElapsed / DWELL_MS)
+        if (dwellProgress >= 1 && !dwellFired) {
+          dwellFired = true
+        }
+
+        // Draw back button highlight + progress
+        ctx.save()
+        ctx.fillStyle = `rgba(0, 255, 65, ${0.05 + dwellProgress * 0.12})`
+        ctx.fillRect(panelLeftX + 4, backBtnY, bounds.w * 2 - 8, 36)
+        if (dwellProgress > 0 && dwellProgress < 1) {
+          ctx.fillStyle = C.primary
+          ctx.fillRect(panelLeftX + 8, backBtnY + 30, (bounds.w * 2 - 16) * dwellProgress, 3)
+        }
+        // Fingertip dot
+        ctx.fillStyle = C.primary
+        ctx.beginPath()
+        ctx.arc(fingerTip.x, fingerTip.y, 5, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      } else {
+        dwellRowIdx = -1
+        dwellStartTime = 0
+      }
+    }
   }
 }

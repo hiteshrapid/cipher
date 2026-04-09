@@ -21,6 +21,8 @@ export const initialHUDState: HUDState = {
   notifications: [],
   activityFeed:  [],
   transcriptPanel: { active: false, x: 0, y: 0, text: '', systemText: '' },
+  focusedWidget: null,
+  drillDown: null,
 }
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
       }
     }
     case 'HIDE_ALL':
-      return { ...state, activeWidgets: new Set<WidgetId>(), searchQuery: null, searchResult: null, transcriptPanel: { active: false, x: 0, y: 0, text: '', systemText: '' } }
+      return { ...state, activeWidgets: new Set<WidgetId>(), searchQuery: null, searchResult: null, transcriptPanel: { active: false, x: 0, y: 0, text: '', systemText: '' }, focusedWidget: null, drillDown: null }
     case 'UPDATE_CONNECTOR':
       return {
         ...state,
@@ -107,6 +109,14 @@ export function hudReducer(state: HUDState, action: HUDAction): HUDState {
           systemText: action.text.slice(-120),
         },
       }
+    case 'FOCUS_WIDGET':
+      return { ...state, focusedWidget: action.id }
+    case 'UNFOCUS_WIDGET':
+      return { ...state, focusedWidget: null, drillDown: null }
+    case 'DRILL_DOWN':
+      return { ...state, drillDown: action.state }
+    case 'DRILL_BACK':
+      return { ...state, drillDown: null }
     default:
       return state
   }

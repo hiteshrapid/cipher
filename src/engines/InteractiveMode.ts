@@ -129,8 +129,6 @@ export class InteractiveMode {
   private mediaRecorder: MediaRecorder | null = null
   private silenceTimeout: number | null = null
   private SILENCE_MS = 60000  // 60s — stays open through natural pauses
-  private palmX = 0
-  private palmY = 0
 
   init(dispatch: Dispatch) {
     this.dispatch = dispatch
@@ -140,10 +138,10 @@ export class InteractiveMode {
     return this.active
   }
 
-  /** Set palm position before toggling — used for transcript panel placement */
-  setPalmPosition(x: number, y: number) {
-    this.palmX = x
-    this.palmY = y
+  /** Set palm position before toggling — reserved for future transcript panel placement */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  setPalmPosition(_x: number, _y: number) {
+    // Reserved for future use
   }
 
   /** Toggle on if inactive, off if active */
@@ -283,24 +281,6 @@ export class InteractiveMode {
     this.silenceTimeout = window.setTimeout(() => {
       this.deactivate()
     }, this.SILENCE_MS)
-  }
-
-  private playChime() {
-    try {
-      const ctx = new AudioContext()
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(880, ctx.currentTime)
-      gain.gain.setValueAtTime(0, ctx.currentTime)
-      gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.02)
-      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3)
-      osc.start(ctx.currentTime)
-      osc.stop(ctx.currentTime + 0.3)
-      setTimeout(() => ctx.close(), 500)
-    } catch { /* ignore audio errors */ }
   }
 
   destroy() {

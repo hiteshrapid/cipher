@@ -2,6 +2,7 @@
 // MediaPipe Hands → finger-counting gesture detection → HUD commands
 
 import type { GestureType, HUDAction, WidgetId } from '../types'
+import { WIDGET_BOUNDS } from '../canvas/layers/WidgetLayer'
 
 type Dispatch = (action: HUDAction) => void
 
@@ -11,7 +12,7 @@ interface Landmark { x: number; y: number; z: number }
 // Each finger maps to a group of widgets toggled together.
 // Finger 1: Sprint + Issues (group); Fingers 2-4: single panel each.
 const FINGER_WIDGETS: WidgetId[][] = [
-  ['sprint', 'issues'],   // finger 1
+  ['sprint'],             // finger 1 (drill into sprint for tickets)
   ['github'],             // finger 2
   ['calendar'],           // finger 3
   ['notifications'],      // finger 4
@@ -20,7 +21,7 @@ const FINGER_WIDGETS: WidgetId[][] = [
 // All panels dispatched on open palm (5 fingers) — issues excluded (finger 1 only)
 const ALL_PANELS: WidgetId[] = [
   'sprint', 'github', 'calendar',
-  'notifications', 'activity', 'metrics',
+  'notifications', 'activity',
 ]
 
 // Base gesture types that can be dispatched via GESTURE_DETECTED
@@ -69,6 +70,32 @@ function isRockOn(lm: Landmark[]): boolean {
   return indexUp && pinkyUp && middleCurled && ringCurled
 }
 
+function isPinch(lm: Landmark[]): boolean {
+  const dist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y)
+  // Require ≥2 other fingers extended to distinguish from fist
+  const othersUp = (lm[12].y < lm[10].y - 0.02 ? 1 : 0)
+                 + (lm[16].y < lm[14].y - 0.02 ? 1 : 0)
+                 + (lm[20].y < lm[18].y - 0.02 ? 1 : 0)
+  return dist < 0.07 && othersUp >= 2
+}
+
+function getPinchCenter(lm: Landmark[], canvasW: number, canvasH: number): { x: number; y: number } {
+  return {
+    x: (1 - (lm[4].x + lm[8].x) / 2) * canvasW,
+    y: ((lm[4].y + lm[8].y) / 2) * canvasH,
+  }
+}
+
+// ─── Hit-test against active widget panels ──────────────────────────────────
+function hitTestWidget(px: number, py: number, active: Set<WidgetId>): WidgetId | null {
+  for (const [id, b] of Object.entries(WIDGET_BOUNDS)) {
+    if (active.has(id as WidgetId) && px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) {
+      return id as WidgetId
+    }
+  }
+  return null
+}
+
 // ─── Palm center (canvas pixel coords) ──────────────────────────────────────
 // Averages wrist + 4 knuckle bases; mirrors x for front-facing camera.
 
@@ -91,6 +118,7 @@ type ExtendedGestureType =
   | 'fist'
   | 'thumbs_up'
   | 'rock_on'
+  | 'pinch'
   | 'finger_1'
   | 'finger_2'
   | 'finger_3'
@@ -114,11 +142,22 @@ function handleGesture(
   }
 
   switch (gesture) {
-    // 5 fingers — show ALL panels
+    // 5 fingers — show ALL panels + exit focus mode
     case 'open_palm': {
+      dispatch({ type: 'UNFOCUS_WIDGET' })
       dispatch({ type: 'COMMAND_RECEIVED', text: 'show all panels' })
       for (const id of ALL_PANELS) {
         dispatch({ type: 'SHOW_WIDGET', id })
+      }
+      break
+    }
+
+    // Pinch — focus on panel under pinch point (GitHub blocked)
+    case 'pinch': {
+      const hit = hitTestWidget(palmX, palmY, activeWidgets)
+      if (hit && hit !== 'github') {
+        dispatch({ type: 'FOCUS_WIDGET', id: hit })
+        dispatch({ type: 'COMMAND_RECEIVED', text: `\u229A focusing ${hit}` })
       }
       break
     }
@@ -166,6 +205,7 @@ export class GestureEngine {
   private lastGesture: ExtendedGestureType | null = null
   private COOLDOWN_MS = 600
   private activeWidgets: Set<WidgetId> = new Set()
+  private focusedWidget: WidgetId | null = null
   private lastLandmarks: Landmark[] | null = null
   private lastDetectTime = 0
   private canvasW = 1280
@@ -209,8 +249,21 @@ export class GestureEngine {
     this.activeWidgets = widgets
   }
 
+  updateFocusedWidget(widget: WidgetId | null) {
+    this.focusedWidget = widget
+  }
+
   getHandLandmarks(): Landmark[] | null {
     return this.lastLandmarks
+  }
+
+  /** Index fingertip position in canvas coords (for hover tracking in focus mode) */
+  getIndexTipPosition(): { x: number; y: number } | null {
+    if (!this.lastLandmarks) return null
+    return {
+      x: (1 - this.lastLandmarks[8].x) * this.canvasW,
+      y: this.lastLandmarks[8].y * this.canvasH,
+    }
   }
 
   start() {
@@ -249,14 +302,46 @@ export class GestureEngine {
     this.lastLandmarks = lm
     if (!this.dispatch) return
     const now = Date.now()
+
+    // ── Focus mode: freeze all gestures except open_palm (exit) and pinch (select item) ──
+    if (this.focusedWidget) {
+      if (now - this.lastGestureTime < this.COOLDOWN_MS) return
+      const nonThumb = countNonThumbExtended(lm)
+      if ((nonThumb === 4 && isThumbExtended(lm)) || countExtendedFingers(lm) === 5) {
+        // Open palm → exit focus mode
+        this.lastGestureTime = now
+        this.lastGesture = 'open_palm'
+        if (this.dispatch) {
+          this.dispatch({ type: 'DRILL_BACK' })
+          this.dispatch({ type: 'UNFOCUS_WIDGET' })
+          this.dispatch({ type: 'COMMAND_RECEIVED', text: 'show all panels' })
+          for (const id of ALL_PANELS) this.dispatch({ type: 'SHOW_WIDGET', id })
+        }
+      } else if (isPinch(lm) && this.lastGesture !== 'pinch') {
+        // Pinch → select hovered item (HUDCanvas reads getIndexTipPosition to resolve item)
+        this.lastGestureTime = now
+        this.lastGesture = 'pinch'
+        if (this.dispatch) {
+          this.dispatch({ type: 'GESTURE_DETECTED', gesture: 'pinch' })
+          this.dispatch({ type: 'COMMAND_RECEIVED', text: '\u229A selecting item' })
+        }
+      } else if (!isPinch(lm)) {
+        this.lastGesture = null
+      }
+      return // block all other gestures in focus mode
+    }
+
     if (now - this.lastGestureTime < this.COOLDOWN_MS) return
 
     let detected: ExtendedGestureType | null = null
 
-    // ── Priority order: Rock On → Fist (with hold) → Thumbs Up → Finger Count ──
+    // ── Priority order: Rock On → Pinch → Fist (with hold) → Thumbs Up → Finger Count ──
 
     if (isRockOn(lm)) {
       detected = 'rock_on'
+      fistHoldStart = null
+    } else if (isPinch(lm)) {
+      detected = 'pinch'
       fistHoldStart = null
     } else if (isFist(lm)) {
       if (fistHoldStart === null) {
@@ -288,10 +373,13 @@ export class GestureEngine {
     if (detected && detected !== this.lastGesture) {
       this.lastGestureTime = now
       this.lastGesture = detected
-      const palm = this.lastLandmarks
-        ? getPalmCenter(this.lastLandmarks, this.canvasW, this.canvasH)
-        : { x: 0, y: 0 }
-      handleGesture(detected, this.dispatch, this.activeWidgets, palm.x, palm.y)
+      // Use pinch centre (thumb+index midpoint) for pinch, palm centre for everything else
+      const coords = (detected === 'pinch' && this.lastLandmarks)
+        ? getPinchCenter(this.lastLandmarks, this.canvasW, this.canvasH)
+        : this.lastLandmarks
+          ? getPalmCenter(this.lastLandmarks, this.canvasW, this.canvasH)
+          : { x: 0, y: 0 }
+      handleGesture(detected, this.dispatch, this.activeWidgets, coords.x, coords.y)
     } else if (!detected) {
       this.lastGesture = null
     }

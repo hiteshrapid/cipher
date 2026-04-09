@@ -6,11 +6,11 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useCameraCapture } from '../hooks/useCameraCapture'
 import { drawHUDChrome, drawCommandFeedback } from './layers/RingLayer'
 import type { AlertLevel } from './layers/RingLayer'
-import { drawWidgets, drawGestureFeedback, drawFaceScanRing, drawIntelCard } from './layers/WidgetLayer'
+import { drawWidgets, drawGestureFeedback, drawFaceScanRing, drawIntelCard, consumeDwellSelection, resetDwell } from './layers/WidgetLayer'
 import { drawHandSkeleton } from './layers/HandLayer'
 import { MatrixRainLayer } from './layers/MatrixRainLayer'
 import { useHUD } from '../store/hudStore'
-import type { WidgetId, ConnectorData, SearchResult, NotificationItem, ActivityItem, SlackData, GmailData } from '../types'
+import type { WidgetId, ConnectorData, SearchResult, NotificationItem, ActivityItem, DrillDownState, SlackData, GmailData } from '../types'
 import { GestureEngine } from '../engines/GestureEngine'
 import { audioEngine } from '../engines/AudioEngine'
 import { interactiveMode } from '../engines/InteractiveMode'
@@ -63,6 +63,8 @@ export function HUDCanvas() {
   const intelCardShownAtRef = useRef<number | null>(null)
   const notificationsRef       = useRef<NotificationItem[]>([])
   const activityFeedRef        = useRef<ActivityItem[]>([])
+  const focusedWidgetRef       = useRef<WidgetId | null>(null)
+  const drillDownRef           = useRef<DrillDownState | null>(null)
   const bootTimeRef            = useRef<number>(Date.now())
   const transcriptPanelRef     = useRef(state.transcriptPanel)
   const transcriptPanelBornAt  = useRef<number | null>(null)
@@ -86,6 +88,12 @@ export function HUDCanvas() {
     searchLoadingRef.current = state.searchLoading
     notificationsRef.current = state.notifications ?? []
     activityFeedRef.current  = state.activityFeed ?? []
+    focusedWidgetRef.current = state.focusedWidget
+    drillDownRef.current     = state.drillDown
+    // Sync focused widget to GestureEngine for gesture freezing
+    if (gestureRef.current) {
+      gestureRef.current.updateFocusedWidget(state.focusedWidget)
+    }
 
     // Track transcript panel birth for entrance animation
     if (state.transcriptPanel.active && !transcriptPanelBornAt.current) {
@@ -136,6 +144,61 @@ export function HUDCanvas() {
     }
 
   }, [state.lastCommand, dispatch])
+
+  // ─── Dwell-to-select: poll in render loop via ref-based callback ────────────
+  const dwellCheckRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    dwellCheckRef.current = () => {
+      if (!state.focusedWidget) return
+      const idx = consumeDwellSelection()
+      if (idx === -1) return
+
+      // Back button sentinel
+      if (idx === -99) {
+        if (state.drillDown) {
+          dispatch({ type: 'DRILL_BACK' })
+          resetDwell()
+        }
+        return
+      }
+
+      // Already drilled down — ignore item dwell
+      if (state.drillDown) return
+
+      if (state.focusedWidget === 'notifications') {
+        const notif = state.notifications[idx]
+        if (notif) {
+          dispatch({ type: 'DRILL_DOWN', state: {
+            type: 'notification', itemIndex: idx,
+            title: notif.text, body: notif.detail ?? notif.text,
+            source: notif.source, timestamp: notif.timestamp,
+          }})
+          resetDwell()
+        }
+      } else if (state.focusedWidget === 'activity') {
+        const act = state.activityFeed[idx]
+        if (act) {
+          dispatch({ type: 'DRILL_DOWN', state: {
+            type: 'activity', itemIndex: idx,
+            title: act.text, body: act.detail ?? act.text,
+            source: act.source, timestamp: act.timestamp,
+          }})
+          resetDwell()
+        }
+      } else if (state.focusedWidget === 'sprint') {
+        const statusMap = ['progress', 'todo', 'review', 'done']
+        const statusLabels = ['In Progress', 'Todo', 'In Review', 'Done']
+        if (idx >= 0 && idx < statusMap.length) {
+          dispatch({ type: 'DRILL_DOWN', state: {
+            type: 'linear_status', statusFilter: statusMap[idx],
+            title: statusLabels[idx], body: '',
+            source: 'linear', timestamp: Date.now(),
+          }})
+          resetDwell()
+        }
+      }
+    }
+  }, [state.focusedWidget, state.drillDown, state.notifications, state.activityFeed, dispatch])
 
   // ─── Smart search (OpenAI → DuckDuckGo → Wikipedia) ──────────────────────────
   useEffect(() => {
@@ -214,6 +277,7 @@ export function HUDCanvas() {
           item: {
             source: 'slack',
             text: `@${msg.author} in ${msg.channel}: ${msg.text}`,
+            detail: msg.text,
             timestamp: new Date(msg.timestamp).getTime(),
             priority: 'normal',
           },
@@ -232,6 +296,7 @@ export function HUDCanvas() {
           item: {
             source: 'slack',
             text: `DM from ${dm.author}: ${dm.text}`,
+            detail: dm.text,
             timestamp: new Date(dm.timestamp).getTime(),
             priority: 'high',
           },
@@ -246,7 +311,7 @@ export function HUDCanvas() {
         seenGmailKeys.current.add(thread.id)
         dispatch({
           type: 'ADD_ACTIVITY',
-          item: { source: 'gmail', text: `${thread.from} \u2014 ${thread.subject}`, timestamp: new Date(thread.timestamp).getTime(), icon: '\u{1F4E7}' },
+          item: { source: 'gmail', text: `${thread.from} \u2014 ${thread.subject}`, detail: thread.snippet ?? '', timestamp: new Date(thread.timestamp).getTime(), icon: '\u{1F4E7}' },
         })
       }
     }
@@ -307,7 +372,6 @@ export function HUDCanvas() {
     dispatch({ type: 'SHOW_WIDGET', id: 'calendar' })
     dispatch({ type: 'SHOW_WIDGET', id: 'notifications' })
     dispatch({ type: 'SHOW_WIDGET', id: 'activity' })
-    dispatch({ type: 'SHOW_WIDGET', id: 'metrics' })
 
     return () => { unsub(); registry.destroy() }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -463,7 +527,12 @@ export function HUDCanvas() {
 
     // ⑥ Widgets
     {
-      drawWidgets(ctx, activeWidgetsRef.current, connectorDataRef.current, birthTimes.current, now, notificationsRef.current, activityFeedRef.current, bootTimeRef.current, transcriptPanelRef.current as Parameters<typeof drawWidgets>[8])
+      // Get fingertip position for hover highlighting in focus mode
+      const fingerTip = gestureRef.current?.getIndexTipPosition() ?? null
+      drawWidgets(ctx, activeWidgetsRef.current, connectorDataRef.current, birthTimes.current, now, notificationsRef.current, activityFeedRef.current, bootTimeRef.current, transcriptPanelRef.current as Parameters<typeof drawWidgets>[8], focusedWidgetRef.current, fingerTip, drillDownRef.current)
+
+      // Check for dwell-to-select completion (after drawWidgets updates dwell state)
+      dwellCheckRef.current()
 
       // Iron Man Intel Card — face-overlay popup for search results
       const isSearchActive = searchLoadingRef.current || searchResultRef.current !== null
